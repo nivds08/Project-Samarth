@@ -9,7 +9,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 import streamlit as st
 from data_handler.fetch_manager import get_dataset
 from data_handler.preprocessor import preprocess
-from query_engine.executor import compare_states
+from src.query_engine.executor import compare_states
+
+
+
+
 
 import matplotlib.pyplot as plt
 
