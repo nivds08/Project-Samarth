@@ -1,8 +1,16 @@
 # app.py
+
+import sys
+import os
+
+# Add the 'src' folder to Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
+
 import streamlit as st
-from src.data_handler.fetch_manager import get_dataset
-from src.data_handler.preprocessor import preprocess
-from src.query_engine.executor import compare_states
+from data_handler.fetch_manager import get_dataset
+from data_handler.preprocessor import preprocess
+from query_engine.executor import compare_states
+
 import matplotlib.pyplot as plt
 
 # 1️⃣ Load and preprocess data
