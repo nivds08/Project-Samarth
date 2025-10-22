@@ -1,6 +1,7 @@
-# src/data_handler/fetch_manager.py
 import pandas as pd
 import os
+from dotenv import load_dotenv
+import requests
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
