@@ -65,7 +65,7 @@ if df is not None and not df.empty:
             st.warning("⚠️ Column suggestions are not available for this dataset.")
 
         # Dynamic Filtering
-        st.markdown("### 🔹 Filter Data")
+    st.markdown("### 🔹 Filter Data")
     filtered_df = df.copy()
     for col in df.columns:
         if df[col].dtype == "object" or df[col].nunique() <= 20:
