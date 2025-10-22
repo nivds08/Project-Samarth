@@ -17,7 +17,7 @@ from src.data_handler.api_handler import fetch_data
 
 
 def fetch_from_api(resource_id):
-    from src.data_handler.api_handler import fetch_data_using_resource_id
+    from src.data_handler.api_handler import fetch_data
     import pandas as pd
 
     print(f"\n[DEBUG] Trying to fetch data for resource_id: {resource_id}")
