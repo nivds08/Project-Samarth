@@ -1,37 +1,25 @@
 # src/data_handler/fetch_manager.py
 import os
-import requests
+import sys
 import pandas as pd
-from dotenv import load_dotenv
+import requests
 
-from .preprocessor import suggest_columns
+# Ensure src is in path (needed for Streamlit)
+project_root = os.path.dirname(os.path.dirname(__file__))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-load_dotenv()
-API_KEY = os.getenv("API_KEY")
-
+# Import local modules
+from src.data_handler.preprocessor import suggest_columns
+from src.data_handler.api_handler import fetch_data_using_resource_id
 
 def fetch_from_api(resource_id):
     """
-    Fetch data from data.gov.in API using resource ID.
-    Returns a tuple: (DataFrame, column suggestions)
+    Fetch dataset from data.gov.in using resource_id and suggest columns.
+    Returns: DataFrame, suggestions
     """
-    url = f"https://data.gov.in/api/datastore/resource.json?resource_id={resource_id}&limit=5000&apikey={API_KEY}"
-
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        records = response.json().get("records", [])
-        df = pd.DataFrame(records)
-
-        if df.empty:
-            print("[WARN] API returned no records")
-            return pd.DataFrame(), {}
-
-        # Generate column suggestions
-        col_suggestions = suggest_columns(df)
-
-        return df, col_suggestions
-
-    except Exception as e:
-        print(f"[ERROR] API fetch failed for {resource_id}: {e}")
-        return pd.DataFrame(), {}
+    df = fetch_data_using_resource_id(resource_id)
+    if df is not None and not df.empty:
+        suggestions = suggest_columns(df)
+        return df, suggestions
+    return df, {}
