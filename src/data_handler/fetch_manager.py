@@ -16,12 +16,15 @@ from src.data_handler.preprocessor import suggest_columns
 from src.data_handler.api_handler import fetch_data
 
 def fetch_from_api(resource_id):
-    """
-    Fetch dataset from data.gov.in using resource_id and suggest columns.
-    Returns: DataFrame, suggestions
-    """
-    df = fetch_data(resource_id)
-    if df is not None and not df.empty:
-        suggestions = suggest_columns(df)
-        return df, suggestions
-    return df, {}
+    from src.data_handler.api_handler import fetch_data_using_resource_id
+    import pandas as pd
+
+    print(f"\n[DEBUG] Trying to fetch data for resource_id: {resource_id}")
+
+    try:
+        df = fetch_data_using_resource_id(resource_id)
+        print(f"[DEBUG] DataFrame returned: {type(df)} with shape {df.shape if isinstance(df, pd.DataFrame) else 'N/A'}")
+        return df
+    except Exception as e:
+        print(f"[ERROR] Exception during fetch: {e}")
+        return None
