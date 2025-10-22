@@ -20,12 +20,13 @@ def fetch_from_api(resource_id):
     from src.data_handler.api_handler import fetch_data
     import pandas as pd
 
-    print(f"\n[DEBUG] Trying to fetch data for resource_id: {resource_id}")
-
     try:
         df = fetch_data(resource_id)
-        print(f"[DEBUG] DataFrame returned: {type(df)} with shape {df.shape if isinstance(df, pd.DataFrame) else 'N/A'}")
-        return df
+        if df is not None and not df.empty:
+            column_suggestions = list(df.columns)
+            return df, column_suggestions
+        else:
+            return None, []
     except Exception as e:
-        print(f"[ERROR] Exception during fetch: {e}")
-        return None
+        print(f"❌ Error fetching data: {e}")
+        return None, []
