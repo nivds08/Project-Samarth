@@ -15,6 +15,7 @@ if project_root not in sys.path:
 from src.data_handler.preprocessor import suggest_columns
 from src.data_handler.api_handler import fetch_data
 
+
 def fetch_from_api(resource_id):
     from src.data_handler.api_handler import fetch_data_using_resource_id
     import pandas as pd
@@ -22,7 +23,7 @@ def fetch_from_api(resource_id):
     print(f"\n[DEBUG] Trying to fetch data for resource_id: {resource_id}")
 
     try:
-        df = fetch_data_using_resource_id(resource_id)
+        df = fetch_data(resource_id)
         print(f"[DEBUG] DataFrame returned: {type(df)} with shape {df.shape if isinstance(df, pd.DataFrame) else 'N/A'}")
         return df
     except Exception as e:
