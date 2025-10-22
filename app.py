@@ -21,6 +21,9 @@ rainfall_df = preprocess(rainfall_df, "rainfall")
 
 # 2️⃣ Sidebar: user input
 st.sidebar.title("Rainfall Comparison")
+st.write("Columns in rainfall_df:", rainfall_df.columns.tolist())
+st.write(rainfall_df.head())
+
 states = rainfall_df['state'].unique()
 state1 = st.sidebar.selectbox("Select State 1", states)
 state2 = st.sidebar.selectbox("Select State 2", states)
