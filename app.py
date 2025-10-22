@@ -42,10 +42,52 @@ st.title("📊 Data Portal Viewer")
 selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
 
 # 6️⃣ Fetch and Display Data
+# ------------------------------------------------------------
+# 3️⃣ Fetch and display data
+# ------------------------------------------------------------
 if st.button("Fetch Data"):
     resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
-        df, col_suggestions = fetch_from_api(resource_id)
+        df = fetch_from_api(resource_id)
+
+    if not df.empty:
+        st.success(f"✅ Successfully fetched {len(df)} records!")
+        st.dataframe(df)
+        
+        # Optional: allow download
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download as CSV",
+            data=csv,
+            file_name=f"{selected_dataset.replace(' ', '_')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
+
+
+# Example dropdowns — customize as needed based on your dataset columns
+selected_state = st.sidebar.text_input("Enter State (optional)")
+selected_year = st.sidebar.text_input("Enter Year (optional)")
+
+# Build filters dynamically
+filters = {}
+if selected_state:
+    filters["state"] = selected_state
+if selected_year:
+    filters["year"] = selected_year
+
+# --- Fetch data using filters ---
+from src.data_handler.api_handler import fetch_data
+df = fetch_data(resource_id, filters=filters, limit=100)
+
+# Display results
+if not df.empty:
+    st.success(f"✅ Showing {len(df)} records")
+    st.dataframe(df)
+else:
+    st.warning("⚠️ No records found for these filters.")
+
 
     if df is not None and not df.empty:
         st.success(f"✅ Successfully fetched {len(df)} records!")
