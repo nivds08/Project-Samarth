@@ -49,9 +49,13 @@ if st.button("Fetch Data"):
 
         # Show column suggestions
         st.markdown("### 🔹 Column Suggestions")
-        for col, info in col_suggestions.items():
-            st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
-            st.write(f"Sample values: {info['sample_values']}")
+        if isinstance(col_suggestions, dict):
+            for col, info in col_suggestions.items():
+                st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
+                st.write(f"Sample values: {info['sample_values']}")
+        else:
+            st.warning("⚠️ Column suggestions are not available for this dataset.")
+
 
         # Optional: allow download
         csv = df.to_csv(index=False).encode('utf-8')
