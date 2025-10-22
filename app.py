@@ -1,4 +1,3 @@
-# app.py
 import sys
 import os
 import streamlit as st
@@ -8,16 +7,13 @@ from dotenv import load_dotenv
 # 1️⃣ Setup paths
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
-# 2️⃣ Import functions
-
 from src.data_handler.fetch_manager import fetch_from_api
 from src.query_engine.executor import compare_states
-from src.utils.config import API_KEY
 
-# 3️⃣ Load environment variables
+# 2️⃣ Load API key
 load_dotenv()
 
-# 4️⃣ Dataset mapping (resource IDs from data.gov.in)
+# 3️⃣ Define datasets (resource IDs from data.gov.in)
 DATASETS = {
     "All India Rainfall (1901-2015)": "8196f6cc-83ff-4b56-8581-2630de9d4a5e",
     "Sub-Divisional Rainfall (1901-2017)": "722e2530-dcb1-4104-bd8f-5a0b22e68999",
@@ -34,105 +30,65 @@ DATASETS = {
     "Vegetable-crops": "d6e5315d-d4a7-4f1f-ab23-c2adcac3e1e7"
 }
 
-# 5️⃣ Streamlit Page Setup
 st.set_page_config(page_title="Data Portal Viewer", layout="wide")
 st.title("📊 Data Portal Viewer")
 
 # Dataset selection
 selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
 
-# 6️⃣ Fetch and Display Data
 # ------------------------------------------------------------
-# 3️⃣ Fetch and display data
+# 3️⃣ Fetch and display data with dynamic filters
 # ------------------------------------------------------------
 if st.button("Fetch Data"):
     resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
-        df = fetch_from_api(resource_id)
+        df, col_suggestions = fetch_from_api(resource_id)
 
-    if not df.empty:
+    if df is not None and not df.empty:
         st.success(f"✅ Successfully fetched {len(df)} records!")
-        st.dataframe(df)
-        
+
+        # Show column suggestions
+        st.markdown("### 🔹 Column Suggestions")
+        for col, info in col_suggestions.items():
+            st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
+            st.write(f"Sample values: {info['sample_values']}")
+
         # Optional: allow download
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download as CSV",
             data=csv,
-            file_name=f"{selected_dataset.replace(' ', '_')}.csv",
+            file_name=f"{selected_dataset.replace(' ', '_') }.csv",
             mime="text/csv"
         )
-    else:
-        st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
 
+        # Dynamic filters for user
+        st.markdown("### 🔹 Filter Data")
+        filtered_df = df.copy()
+        for col in df.columns:
+            if df[col].dtype == "object":
+                unique_vals = df[col].dropna().unique().tolist()
+                selected_vals = st.multiselect(f"Filter **{col}**:", unique_vals, default=unique_vals)
+                filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
+            elif pd.api.types.is_numeric_dtype(df[col]):
+                min_val, max_val = float(df[col].min()), float(df[col].max())
+                selected_range = st.slider(f"Filter **{col}**:", min_val, max_val, (min_val, max_val))
+                filtered_df = filtered_df[(filtered_df[col] >= selected_range[0]) & (filtered_df[col] <= selected_range[1])]
 
-# Example dropdowns — customize as needed based on your dataset columns
-selected_state = st.sidebar.text_input("Enter State (optional)")
-selected_year = st.sidebar.text_input("Enter Year (optional)")
-
-# Build filters dynamically
-filters = {}
-if selected_state:
-    filters["state"] = selected_state
-if selected_year:
-    filters["year"] = selected_year
-
-# --- Fetch data using filters ---
-from src.data_handler.api_handler import fetch_data
-df = fetch_data(resource_id, filters=filters, limit=100)
-
-# Display results
-if not df.empty:
-    st.success(f"✅ Showing {len(df)} records")
-    st.dataframe(df)
-else:
-    st.warning("⚠️ No records found for these filters.")
-
-
-    if df is not None and not df.empty:
-        st.success(f"✅ Successfully fetched {len(df)} records!")
-        st.dataframe(df)
-
-        # -----------------------------
-        # Show column suggestions
-        # -----------------------------
-        st.write("### Column Suggestions")
-        for col, info in col_suggestions.items():
-            st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
-            st.write(f"Sample values: {info['sample_values']}")
-
-        # -----------------------------
-        # Let user select metric & category columns
-        # -----------------------------
-        metric_col = st.selectbox("Select metric column", options=list(col_suggestions.keys()))
-        category_col = st.selectbox("Select category/region column", options=list(col_suggestions.keys()))
-
-        # Optional: download button
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download as CSV",
-            data=csv,
-            file_name=f"{selected_dataset.replace(' ', '_')}.csv",
-            mime="text/csv"
-        )
+        st.markdown("### 🔹 Filtered Data")
+        st.dataframe(filtered_df)
 
         # Optional comparison feature
         st.markdown("### 🔍 Compare with Another Dataset (Optional)")
         compare_choice = st.selectbox("Select another dataset to compare:", ["None"] + list(DATASETS.keys()))
-
         if compare_choice != "None":
             compare_id = DATASETS[compare_choice]
             with st.spinner(f"Fetching comparison dataset: {compare_choice}..."):
-                df2, col_suggestions2 = fetch_from_api(compare_id)
-
+                df2, _ = fetch_from_api(compare_id)
             if df2 is not None and not df2.empty:
                 st.info(f"Comparing **{selected_dataset}** and **{compare_choice}** ...")
                 try:
-                    comparison_result = compare_states(
-                        df, df2,
-                        category_col=category_col,
-                        metric_col=metric_col
-                    )
+                    comparison_result = compare_states(filtered_df, df2)
                     st.dataframe(comparison_result)
                 except Exception as e:
                     st.error(f"Error during comparison: {e}")
@@ -141,6 +97,8 @@ else:
     else:
         st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
 
-# 7️⃣ Footer
+# ------------------------------------------------------------
+# 4️⃣ Footer
+# ------------------------------------------------------------
 st.markdown("---")
 st.caption("Powered by data.gov.in | Built with ❤️ using Streamlit")
