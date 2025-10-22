@@ -1,25 +1,20 @@
 # src/data_handler/preprocessor.py
 import pandas as pd
 
-def preprocess(df, dataset_type):
+def suggest_columns(df, top_n=10):
     """
-    Basic preprocessing for different dataset types.
-    Currently supports: 'rainfall'
+    Analyze the dataset and suggest potential important columns.
+    Returns a dict with summary info about each column.
     """
     if df is None or df.empty:
-        print("[WARN] Empty DataFrame passed to preprocess")
-        return df
+        return {}
 
-    if dataset_type.lower() == "rainfall":
-        # Ensure columns are correct
-        df = df.rename(columns=str.lower)
-        # Example: standardize state names
-        if "state" in df.columns:
-            df["state"] = df["state"].str.strip().str.title()
-        # Ensure year column is integer
-        if "year" in df.columns:
-            df["year"] = df["year"].astype(int)
-        # Ensure rainfall column exists
-        if "rainfall_mm" in df.columns:
-            df["rainfall_mm"] = pd.to_numeric(df["rainfall_mm"], errors="coerce")
-    return df
+    col_summary = {}
+    for col in df.columns:
+        col_summary[col] = {
+            "dtype": str(df[col].dtype),
+            "num_unique": df[col].nunique(),
+            "num_missing": df[col].isna().sum(),
+            "sample_values": df[col].dropna().unique()[:top_n].tolist()
+        }
+    return col_summary

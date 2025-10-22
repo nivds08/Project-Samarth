@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
 # 2️⃣ Import functions
+
 from src.data_handler.fetch_manager import fetch_from_api
 from src.query_engine.executor import compare_states
 from src.utils.config import API_KEY
