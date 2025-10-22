@@ -33,20 +33,14 @@ DATASETS = {
     "Vegetable-crops": "d6e5315d-d4a7-4f1f-ab23-c2adcac3e1e7"
 }
 
-# ------------------------------------------------------------
 # 5️⃣ Streamlit Page Setup
-# ------------------------------------------------------------
 st.set_page_config(page_title="Data Portal Viewer", layout="wide")
 st.title("📊 Data Portal Viewer")
 
 # Dataset selection
 selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
 
-# ------------------------------------------------------------
 # 6️⃣ Fetch and Display Data
-# ------------------------------------------------------------
-
-
 if st.button("Fetch Data"):
     resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
@@ -56,18 +50,19 @@ if st.button("Fetch Data"):
         st.success(f"✅ Successfully fetched {len(df)} records!")
         st.dataframe(df)
 
+        # -----------------------------
         # Show column suggestions
+        # -----------------------------
         st.write("### Column Suggestions")
         for col, info in col_suggestions.items():
             st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
             st.write(f"Sample values: {info['sample_values']}")
 
-        # Let user select metric/category columns
+        # -----------------------------
+        # Let user select metric & category columns
+        # -----------------------------
         metric_col = st.selectbox("Select metric column", options=list(col_suggestions.keys()))
         category_col = st.selectbox("Select category/region column", options=list(col_suggestions.keys()))
-
-   
-
 
         # Optional: download button
         csv = df.to_csv(index=False).encode('utf-8')
@@ -85,7 +80,7 @@ if st.button("Fetch Data"):
         if compare_choice != "None":
             compare_id = DATASETS[compare_choice]
             with st.spinner(f"Fetching comparison dataset: {compare_choice}..."):
-                df2 = fetch_from_api(compare_id)
+                df2, _ = fetch_from_api(compare_id)
 
             if df2 is not None and not df2.empty:
                 st.info(f"Comparing **{selected_dataset}** and **{compare_choice}** ...")
@@ -99,8 +94,6 @@ if st.button("Fetch Data"):
     else:
         st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
 
-# ------------------------------------------------------------
 # 7️⃣ Footer
-# ------------------------------------------------------------
 st.markdown("---")
 st.caption("Powered by data.gov.in | Built with ❤️ using Streamlit")
