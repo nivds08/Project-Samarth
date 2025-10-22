@@ -40,14 +40,22 @@ selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
 # 3️⃣ Fetch and display data with dynamic filters
 # ------------------------------------------------------------
 if st.button("Fetch Data"):
-    resource_id = DATASETS[selected_dataset]
+    # Dropdown for selecting dataset
+    selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
+
+# ------------------------------------------------------------
+# Fetch and filter data
+# ------------------------------------------------------------
+if st.button("Fetch Data"):
+    if st.button("Fetch Data"):
+        resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
         df, col_suggestions = fetch_from_api(resource_id)
 
     if df is not None and not df.empty:
         st.success(f"✅ Successfully fetched {len(df)} records!")
 
-        # Show column suggestions
+        # Column Suggestions
         st.markdown("### 🔹 Column Suggestions")
         if isinstance(col_suggestions, dict):
             for col, info in col_suggestions.items():
@@ -56,21 +64,11 @@ if st.button("Fetch Data"):
         else:
             st.warning("⚠️ Column suggestions are not available for this dataset.")
 
-
-        # Optional: allow download
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download as CSV",
-            data=csv,
-            file_name=f"{selected_dataset.replace(' ', '_') }.csv",
-            mime="text/csv"
-        )
-
-        # Dynamic filters for user
+        # Dynamic Filtering
         st.markdown("### 🔹 Filter Data")
         filtered_df = df.copy()
         for col in df.columns:
-            if df[col].dtype == "object":
+            if df[col].dtype == "object" or df[col].nunique() <= 20:
                 unique_vals = df[col].dropna().unique().tolist()
                 selected_vals = st.multiselect(f"Filter **{col}**:", unique_vals, default=unique_vals)
                 filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
@@ -82,7 +80,16 @@ if st.button("Fetch Data"):
         st.markdown("### 🔹 Filtered Data")
         st.dataframe(filtered_df)
 
-        # Optional comparison feature
+        # Download filtered data
+        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Filtered Data as CSV",
+            data=csv,
+            file_name=f"{selected_dataset.replace(' ', '_')}_filtered.csv",
+            mime="text/csv"
+        )
+
+        # Optional comparison
         st.markdown("### 🔍 Compare with Another Dataset (Optional)")
         compare_choice = st.selectbox("Select another dataset to compare:", ["None"] + list(DATASETS.keys()))
         if compare_choice != "None":
@@ -98,6 +105,7 @@ if st.button("Fetch Data"):
                     st.error(f"Error during comparison: {e}")
             else:
                 st.error("❌ Could not fetch comparison dataset.")
+
     else:
         st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
 
