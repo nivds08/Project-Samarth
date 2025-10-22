@@ -45,14 +45,29 @@ selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
 # ------------------------------------------------------------
 # 6️⃣ Fetch and Display Data
 # ------------------------------------------------------------
+
+
 if st.button("Fetch Data"):
     resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
-        df = fetch_from_api(resource_id)
+        df, col_suggestions = fetch_from_api(resource_id)
 
     if df is not None and not df.empty:
         st.success(f"✅ Successfully fetched {len(df)} records!")
         st.dataframe(df)
+
+        # Show column suggestions
+        st.write("### Column Suggestions")
+        for col, info in col_suggestions.items():
+            st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
+            st.write(f"Sample values: {info['sample_values']}")
+
+        # Let user select metric/category columns
+        metric_col = st.selectbox("Select metric column", options=list(col_suggestions.keys()))
+        category_col = st.selectbox("Select category/region column", options=list(col_suggestions.keys()))
+
+   
+
 
         # Optional: download button
         csv = df.to_csv(index=False).encode('utf-8')
