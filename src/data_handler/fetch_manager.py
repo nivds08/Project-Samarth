@@ -4,7 +4,7 @@ import requests
 import pandas as pd
 from dotenv import load_dotenv
 
-from src.data_handler.preprocessor import suggest_columns
+from .preprocessor import suggest_columns
 
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
