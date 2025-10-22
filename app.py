@@ -30,68 +30,66 @@ DATASETS = {
     "Vegetable-crops": "d6e5315d-d4a7-4f1f-ab23-c2adcac3e1e7"
 }
 
+# 4️⃣ Streamlit page config
 st.set_page_config(page_title="Data Portal Viewer", layout="wide")
 st.title("📊 Data Portal Viewer")
 
 # Dataset selection
-selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
+selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()), key="dataset_select")
+
+# Initialize variables
+df = None
+col_suggestions = None
 
 # ------------------------------------------------------------
-# 3️⃣ Fetch and display data with dynamic filters
+# Fetch and display data with dynamic filters
 # ------------------------------------------------------------
-if st.button("Fetch Data"):
-    # Dropdown for selecting dataset
-    selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
-
-# ------------------------------------------------------------
-# Fetch and filter data
-# ------------------------------------------------------------
-if st.button("Fetch Data"):
-    
+if st.button("Fetch Data", key="fetch_data_btn"):
     resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
         df, col_suggestions = fetch_from_api(resource_id)
 
-if df is not None and not df.empty:
-    st.success(f"✅ Successfully fetched {len(df)} records!")
+    if df is not None and not df.empty:
+        st.success(f"✅ Successfully fetched {len(df)} records!")
 
-        # Column Suggestions
-    st.markdown("### 🔹 Column Suggestions")
-    if isinstance(col_suggestions, dict):
+        # --- Column Suggestions ---
+        st.markdown("### 🔹 Column Suggestions")
+        if isinstance(col_suggestions, dict):
             for col, info in col_suggestions.items():
                 st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
                 st.write(f"Sample values: {info['sample_values']}")
-    else:
+        else:
             st.warning("⚠️ Column suggestions are not available for this dataset.")
 
-        # Dynamic Filtering
-    st.markdown("### 🔹 Filter Data")
-    filtered_df = df.copy()
-    for col in df.columns:
-        if df[col].dtype == "object" or df[col].nunique() <= 20:
-            unique_vals = df[col].dropna().unique().tolist()
-            selected_vals = st.multiselect(f"Filter **{col}**:", unique_vals, default=unique_vals)
-            filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
-        elif pd.api.types.is_numeric_dtype(df[col]):
-            min_val, max_val = float(df[col].min()), float(df[col].max())
-            selected_range = st.slider(f"Filter **{col}**:", min_val, max_val, (min_val, max_val))
-            filtered_df = filtered_df[(filtered_df[col] >= selected_range[0]) & (filtered_df[col] <= selected_range[1])]
+        # --- Dynamic Filtering ---
+        st.markdown("### 🔹 Filter Data")
+        filtered_df = df.copy()
+        for col in df.columns:
+            if df[col].dtype == "object" or df[col].nunique() <= 20:
+                unique_vals = df[col].dropna().unique().tolist()
+                selected_vals = st.multiselect(f"Filter **{col}**:", unique_vals, default=unique_vals, key=f"filter_{col}")
+                filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
+            elif pd.api.types.is_numeric_dtype(df[col]):
+                min_val, max_val = float(df[col].min()), float(df[col].max())
+                selected_range = st.slider(f"Filter **{col}**:", min_val, max_val, (min_val, max_val), key=f"slider_{col}")
+                filtered_df = filtered_df[(filtered_df[col] >= selected_range[0]) & (filtered_df[col] <= selected_range[1])]
 
         st.markdown("### 🔹 Filtered Data")
         st.dataframe(filtered_df)
 
-        # Download filtered data
+        # --- Download filtered data ---
         csv = filtered_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download Filtered Data as CSV",
             data=csv,
             file_name=f"{selected_dataset.replace(' ', '_')}_filtered.csv",
-            mime="text/csv"
+            mime="text/csv",
+            key="download_filtered_btn"
         )
 
-        # Optional comparison
+        # --- Optional comparison ---
         st.markdown("### 🔍 Compare with Another Dataset (Optional)")
-        compare_choice = st.selectbox("Select another dataset to compare:", ["None"] + list(DATASETS.keys()))
+        compare_choice = st.selectbox("Select another dataset to compare:", ["None"] + list(DATASETS.keys()), key="compare_select")
         if compare_choice != "None":
             compare_id = DATASETS[compare_choice]
             with st.spinner(f"Fetching comparison dataset: {compare_choice}..."):
@@ -105,12 +103,11 @@ if df is not None and not df.empty:
                     st.error(f"Error during comparison: {e}")
             else:
                 st.error("❌ Could not fetch comparison dataset.")
-
     else:
         st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
 
 # ------------------------------------------------------------
-# 4️⃣ Footer
+# 5️⃣ Footer
 # ------------------------------------------------------------
 st.markdown("---")
 st.caption("Powered by data.gov.in | Built with ❤️ using Streamlit")
