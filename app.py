@@ -47,35 +47,35 @@ if st.button("Fetch Data"):
 # Fetch and filter data
 # ------------------------------------------------------------
 if st.button("Fetch Data"):
-    if st.button("Fetch Data"):
-        resource_id = DATASETS[selected_dataset]
+    
+    resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
         df, col_suggestions = fetch_from_api(resource_id)
 
-    if df is not None and not df.empty:
-        st.success(f"✅ Successfully fetched {len(df)} records!")
+if df is not None and not df.empty:
+    st.success(f"✅ Successfully fetched {len(df)} records!")
 
         # Column Suggestions
-        st.markdown("### 🔹 Column Suggestions")
-        if isinstance(col_suggestions, dict):
+    st.markdown("### 🔹 Column Suggestions")
+    if isinstance(col_suggestions, dict):
             for col, info in col_suggestions.items():
                 st.write(f"**{col}** — dtype: {info['dtype']}, unique: {info['num_unique']}, missing: {info['num_missing']}")
                 st.write(f"Sample values: {info['sample_values']}")
-        else:
+    else:
             st.warning("⚠️ Column suggestions are not available for this dataset.")
 
         # Dynamic Filtering
         st.markdown("### 🔹 Filter Data")
-        filtered_df = df.copy()
-        for col in df.columns:
-            if df[col].dtype == "object" or df[col].nunique() <= 20:
-                unique_vals = df[col].dropna().unique().tolist()
-                selected_vals = st.multiselect(f"Filter **{col}**:", unique_vals, default=unique_vals)
-                filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
-            elif pd.api.types.is_numeric_dtype(df[col]):
-                min_val, max_val = float(df[col].min()), float(df[col].max())
-                selected_range = st.slider(f"Filter **{col}**:", min_val, max_val, (min_val, max_val))
-                filtered_df = filtered_df[(filtered_df[col] >= selected_range[0]) & (filtered_df[col] <= selected_range[1])]
+    filtered_df = df.copy()
+    for col in df.columns:
+        if df[col].dtype == "object" or df[col].nunique() <= 20:
+            unique_vals = df[col].dropna().unique().tolist()
+            selected_vals = st.multiselect(f"Filter **{col}**:", unique_vals, default=unique_vals)
+            filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
+        elif pd.api.types.is_numeric_dtype(df[col]):
+            min_val, max_val = float(df[col].min()), float(df[col].max())
+            selected_range = st.slider(f"Filter **{col}**:", min_val, max_val, (min_val, max_val))
+            filtered_df = filtered_df[(filtered_df[col] >= selected_range[0]) & (filtered_df[col] <= selected_range[1])]
 
         st.markdown("### 🔹 Filtered Data")
         st.dataframe(filtered_df)
