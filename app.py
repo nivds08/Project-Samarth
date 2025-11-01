@@ -31,6 +31,34 @@ DATASETS = {
 
 st.set_page_config(page_title="Data Portal Viewer", layout="wide")
 st.title("📊 Data Portal Viewer")
+# Custom CSS styling for hand pointer on dropdown hover
+st.markdown(
+    """
+    <style>
+    /* Make dropdowns use hand pointer */
+    div[data-baseweb="select"] {
+        cursor: pointer !important;
+    }
+
+    /* Also change pointer for buttons */
+    button[kind="primary"], button[kind="secondary"] {
+        cursor: pointer !important;
+    }
+
+    /* Optional: make the select box look a bit cleaner */
+    div[data-baseweb="select"] > div {
+        border-radius: 8px !important;
+    }
+
+    /* Slight hover glow (optional aesthetic) */
+    div[data-baseweb="select"]:hover {
+        box-shadow: 0 0 5px rgba(0, 150, 255, 0.4);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 
 # -------------------------
 # helper utilities
