@@ -96,46 +96,45 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
         else:
             st.info("⚠️ Column suggestions are not available for this dataset.")
 
-    # Manual Filters
-        # === FILTERS ===
-    st.markdown("### 🎛️ Filters")
+    # --- FILTER SECTION ---
+st.markdown("### 🎛️ Filters")
 
-    if df is not None and not df.empty:
-        # Normalize column names
-        df.columns = [c.strip() for c in df.columns]
+filtered_df = None  # ✅ Always define it first to avoid NameError
 
-        # Define rules for filtering
-        filterable_cols = []
-        for col in df.columns:
-            unique_vals = df[col].dropna().unique()
-            # Only include columns that:
-            # - are not purely numeric
-            # - have between 2 and 50 unique values (so we skip months or large numeric data)
-            if (
-                df[col].dtype == "object"
-                and 2 <= len(unique_vals) <= 50
-                and not any(x in col.lower() for x in ["value", "amount", "total", "jan", "feb", "mar", "apr", "may",
-                                                       "jun", "jul", "aug", "sep", "oct", "nov", "dec"])
-            ):
-                filterable_cols.append(col)
+if df is not None and not df.empty:
+    # Identify suitable columns
+    categorical_cols = [c for c in df.columns if df[c].dtype == "object" or df[c].nunique() <= 20]
+    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
 
-        if not filterable_cols:
-            st.info("No suitable categorical filters found for this dataset.")
+    if not categorical_cols and not numeric_cols:
+        st.info("No suitable filters found for this dataset.")
+        filtered_df = df.copy()
+    else:
+        filtered_df = df.copy()
+
+        # --- Categorical Filters ---
+        if categorical_cols:
+            with st.expander("🔹 Categorical Filters", expanded=False):
+                for col in categorical_cols:
+                    unique_vals = df[col].dropna().unique().tolist()
+                    if len(unique_vals) > 1:
+                        selected_vals = st.multiselect(f"Filter **{col}**:", unique_vals, default=unique_vals)
+                        filtered_df = filtered_df[filtered_df[col].isin(selected_vals)]
         else:
-            selected_filters = {}
-            for col in filterable_cols:
-                options = sorted(df[col].dropna().unique().tolist())
-                choice = st.selectbox(f"Filter by {col}:", ["All"] + options, key=f"filter_{col}")
-                if choice != "All":
-                    selected_filters[col] = choice
+            st.info("No suitable categorical filters found for this dataset.")
 
-            # Apply filters
-            if selected_filters:
-                for col, val in selected_filters.items():
-                    df = df[df[col] == val]
+        # --- Numeric Filters ---
+        if numeric_cols:
+            with st.expander("🔹 Numeric Filters", expanded=False):
+                for col in numeric_cols:
+                    min_val, max_val = float(df[col].min()), float(df[col].max())
+                    selected_range = st.slider(f"Filter **{col}** range:", min_val, max_val, (min_val, max_val))
+                    filtered_df = filtered_df[(filtered_df[col] >= selected_range[0]) & (filtered_df[col] <= selected_range[1])]
+        else:
+            st.info("No suitable numeric filters found for this dataset.")
 
-            st.success(f"✅ Showing filtered results ({len(df)} rows)")
-            st.dataframe(df.head(100))
+
+
 
 
     # Results
