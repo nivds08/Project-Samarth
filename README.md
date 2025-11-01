@@ -1,4 +1,4 @@
-# 🪶 Manthana — AI-Powered Q&A System for Bharat
+# 🪶 Manthana — AI-Powered Q&A System
 
 *"Churning government data to extract the required insights."*
 
