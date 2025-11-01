@@ -34,7 +34,7 @@ DATASETS = {
 # -------------------------
 # Page config & small CSS
 # -------------------------
-st.set_page_config(page_title="Data Portal Viewer", layout="wide")
+st.set_page_config(page_title="Project-Samarth: An AI driven Q&A system", layout="wide")
 st.markdown(
     """
     <style>
