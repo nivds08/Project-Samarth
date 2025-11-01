@@ -21,8 +21,8 @@ Inspired by the Sanskrit word *Manthana* — meaning *churning* — this system 
 
 ## 🧩 Tech Stack
 - **Frontend:** Streamlit  
-- **Backend:** Python  
-- **Libraries:** Pandas, NumPy, OpenAI API / LangChain  
+- **Backend:** Python  (for data handling and logic)
+- **Libraries:** Pandas, dotenv, requests  
 - **Data Sources:** Government Open Data Platform (data.gov.in)  
 
 ---
