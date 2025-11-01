@@ -28,10 +28,10 @@ Inspired by the Sanskrit word *Manthana* — meaning *churning* — this system 
 ---
 
 ## 🏗️ System Architecture
-1. User enters a query in plain English or Hindi.  
-2. The system parses the query and maps it to relevant dataset columns.  
-3. AI module extracts relevant data and formulates an answer.  
-4. The response is displayed along with related insights or graphs.  
+1. User selects a required dataset.  
+2. The system fetches that dataset and allows the user to filter out the required data.  
+3. AI module extracts relevant data and formulates a suitable output.  
+4. The system also allows the user to compare one dataset with another datasets to find required answers.
 
 ---
 
