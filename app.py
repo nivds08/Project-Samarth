@@ -84,34 +84,59 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
     st.success(f"✅ Successfully fetched {len(df)} records for **{selected_dataset}**")
 
     # Column Suggestions
-    st.markdown("### 🔹 Column Overview")
-    if isinstance(col_suggestions, dict) and col_suggestions:
-        cols_md = []
-        for col, info in col_suggestions.items():
-            cols_md.append(f"- **{col}** — {info['dtype']}, unique={info['num_unique']}, missing={info['num_missing']}")
-        st.write("\n".join(cols_md))
-    else:
-        st.warning("⚠️ Column suggestions are not available for this dataset.")
+    # === COLUMN SUGGESTIONS (Compact Version) ===
+    with st.expander("💡 Column Overview (click to expand/minimize)", expanded=False):
+        if isinstance(col_suggestions, dict) and col_suggestions:
+            cols_md = []
+            for col, info in col_suggestions.items():
+                cols_md.append(
+                    f"- **{col}** — {info['dtype']}, unique={info['num_unique']}, missing={info['num_missing']}"
+                )
+            st.markdown("\n".join(cols_md))
+        else:
+            st.info("⚠️ Column suggestions are not available for this dataset.")
 
     # Manual Filters
-    st.markdown("### ⚙️ Filter Data")
-    filtered_df = df.copy()
+        # === FILTERS ===
+    st.markdown("### 🎛️ Filters")
 
-    with st.expander("Show Filters"):
+    if df is not None and not df.empty:
+        # Normalize column names
+        df.columns = [c.strip() for c in df.columns]
+
+        # Define rules for filtering
+        filterable_cols = []
         for col in df.columns:
-            try:
-                if df[col].dtype == "object" or df[col].nunique() <= 30:
-                    unique_vals = df[col].dropna().astype(str).unique().tolist()
-                    sel = st.multiselect(f"{col}", unique_vals, default=[], key=f"filter__{col}")
-                    if sel:
-                        filtered_df = filtered_df[filtered_df[col].astype(str).isin(sel)]
-                elif pd.api.types.is_numeric_dtype(df[col]):
-                    min_val, max_val = float(df[col].min()), float(df[col].max())
-                    sel_range = st.slider(f"{col}", min_val, max_val, (min_val, max_val), key=f"slider__{col}")
-                    if sel_range != (min_val, max_val):
-                        filtered_df = filtered_df[(filtered_df[col] >= sel_range[0]) & (filtered_df[col] <= sel_range[1])]
-            except Exception:
-                continue
+            unique_vals = df[col].dropna().unique()
+            # Only include columns that:
+            # - are not purely numeric
+            # - have between 2 and 50 unique values (so we skip months or large numeric data)
+            if (
+                df[col].dtype == "object"
+                and 2 <= len(unique_vals) <= 50
+                and not any(x in col.lower() for x in ["value", "amount", "total", "jan", "feb", "mar", "apr", "may",
+                                                       "jun", "jul", "aug", "sep", "oct", "nov", "dec"])
+            ):
+                filterable_cols.append(col)
+
+        if not filterable_cols:
+            st.info("No suitable categorical filters found for this dataset.")
+        else:
+            selected_filters = {}
+            for col in filterable_cols:
+                options = sorted(df[col].dropna().unique().tolist())
+                choice = st.selectbox(f"Filter by {col}:", ["All"] + options, key=f"filter_{col}")
+                if choice != "All":
+                    selected_filters[col] = choice
+
+            # Apply filters
+            if selected_filters:
+                for col, val in selected_filters.items():
+                    df = df[df[col] == val]
+
+            st.success(f"✅ Showing filtered results ({len(df)} rows)")
+            st.dataframe(df.head(100))
+
 
     # Results
     st.markdown("### 🔹 Filtered Results")
@@ -129,21 +154,51 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
         mime="text/csv"
     )
 
-    # Comparison
+        # Comparison
     st.markdown("### 🔍 Compare with Another Dataset (Optional)")
     compare_choice = st.selectbox("Compare with:", ["None"] + list(DATASETS.keys()), key="compare_select")
+
     if compare_choice != "None":
         compare_id = DATASETS[compare_choice]
         with st.spinner(f"Fetching comparison dataset: {compare_choice} ..."):
             df2, _ = fetch_from_api(compare_id)
+
         if df2 is not None and not df2.empty:
-            try:
-                comparison_result = compare_states(filtered_df, df2)
-                st.dataframe(comparison_result)
-            except Exception as e:
-                st.error(f"Error while comparing: {e}")
+            # Normalize column names (case-insensitive matching)
+            df.columns = [c.strip().lower() for c in df.columns]
+            df2.columns = [c.strip().lower() for c in df2.columns]
+
+            common_cols = list(set(df.columns).intersection(set(df2.columns)))
+
+            if not common_cols:
+                st.error("❌ No common columns found between the two datasets. Unable to compare.")
+            else:
+                st.info(f"Common columns detected: {', '.join(common_cols)}")
+
+                # Try comparing on 'year' or similar column if available
+                preferred_keys = ["year", "yr", "years"]
+                key_col = next((c for c in preferred_keys if c in common_cols), None)
+
+                try:
+                    if key_col:
+                        merged = pd.merge(df, df2, on=key_col, how="inner", suffixes=("_ds1", "_ds2"))
+                        st.success(f"✅ Compared on '{key_col}' column. Showing first 100 rows:")
+                        st.dataframe(merged.head(100))
+                    else:
+                        # fallback — show side-by-side preview
+                        st.warning("⚠️ No 'year'-like column found. Showing side-by-side preview of both datasets.")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.write(f"**{selected_dataset}** sample:")
+                            st.dataframe(df.head(50))
+                        with c2:
+                            st.write(f"**{compare_choice}** sample:")
+                            st.dataframe(df2.head(50))
+                except Exception as e:
+                    st.error(f"Error while comparing: {e}")
         else:
             st.error("Could not fetch the comparison dataset.")
+
 
 # Footer
 st.markdown("---")
