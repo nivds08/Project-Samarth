@@ -1,17 +1,20 @@
+# app.py
 import sys
 import os
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 
-# --- setup paths so `src` imports work ---
+# make src importable
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 from src.data_handler.fetch_manager import fetch_from_api
-from src.query_engine.executor import compare_states
+from src.query_engine.executor import compare_states  # keep using it if present
 
 load_dotenv()
 
-# --- dataset mapping ---
+# -------------------------
+# Dataset mapping (resource IDs)
+# -------------------------
 DATASETS = {
     "All India Rainfall (1901-2015)": "8196f6cc-83ff-4b56-8581-2630de9d4a5e",
     "Sub-Divisional Rainfall (1901-2017)": "722e2530-dcb1-4104-bd8f-5a0b22e68999",
@@ -28,44 +31,59 @@ DATASETS = {
     "Vegetable-crops": "d6e5315d-d4a7-4f1f-ab23-c2adcac3e1e7"
 }
 
+# -------------------------
+# Page config & small CSS
+# -------------------------
 st.set_page_config(page_title="Data Portal Viewer", layout="wide")
-
-# --- cursor styling ---
-st.markdown("""
-<style>
-div[data-baseweb="select"] > div {
-    cursor: pointer !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
+st.markdown(
+    """
+    <style>
+    /* pointer on selectboxes */
+    div[data-baseweb="select"] > div { cursor: pointer !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 st.title("📊 Data Portal Viewer")
 
 # -------------------------
-# helper utilities
+# Helpers
 # -------------------------
 def clear_fetched_data():
-    """Clear stored dataset when user changes selection."""
-    for key in ("df", "col_suggestions", "filtered_df"):
-        if key in st.session_state:
-            del st.session_state[key]
+    for k in ("df", "col_suggestions", "filtered_df"):
+        st.session_state.pop(k, None)
+
+def is_month_col_name(col_name: str) -> bool:
+    c = col_name.lower()
+    months = ("jan","feb","mar","apr","may","jun","jul","aug","sep","sept","oct","nov","dec",
+              "january","february","march","april","may","june","july","august","september","october","november","december")
+    return any(m in c for m in months)
+
+def looks_like_value_column(series: pd.Series) -> bool:
+    # True when the column is numeric OR has many unique numeric-like values
+    if pd.api.types.is_numeric_dtype(series):
+        return True
+    try:
+        unique = series.dropna().astype(str).unique()
+        # if most unique values are numeric-like and there are many, consider value column
+        if len(unique) > 50 and sum(1 for v in unique if v.replace('.', '', 1).isdigit()) / len(unique) > 0.6:
+            return True
+    except Exception:
+        pass
+    return False
 
 # -------------------------
-# dataset selector
+# Dataset selection
 # -------------------------
-selected_dataset = st.selectbox(
-    "Choose a dataset:",
-    list(DATASETS.keys()),
-    key="dataset_select"
-)
+selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()), key="dataset_select")
 
-# if user changed dataset since last run, clear previous fetch
+# clear stored data when dataset changes
 if st.session_state.get("last_dataset") != selected_dataset:
     clear_fetched_data()
     st.session_state["last_dataset"] = selected_dataset
 
 # -------------------------
-# fetch button
+# Fetch data button
 # -------------------------
 if st.button("Fetch Data", key="fetch_data_btn"):
     resource_id = DATASETS[selected_dataset]
@@ -76,86 +94,158 @@ if st.button("Fetch Data", key="fetch_data_btn"):
     st.session_state.pop("filtered_df", None)
 
 # -------------------------
-# Main UI when data is fetched
+# Show UI only when df exists
 # -------------------------
 if "df" in st.session_state and st.session_state["df"] is not None and not st.session_state["df"].empty:
-    df = st.session_state["df"]
+    df = st.session_state["df"].copy()
     col_suggestions = st.session_state.get("col_suggestions", {})
 
     st.success(f"✅ Successfully fetched {len(df)} records for **{selected_dataset}**")
 
-    # --- Column suggestions (collapsible) ---
-    with st.expander("📋 Column Overview"):
+    # Compact column suggestions in an expander
+    with st.expander("📋 Column Overview", expanded=False):
         if isinstance(col_suggestions, dict) and col_suggestions:
-            cols_md = []
             for col, info in col_suggestions.items():
-                cols_md.append(f"- **{col}** — {info['dtype']}, unique={info['num_unique']}, missing={info['num_missing']}")
-            st.markdown("\n".join(cols_md))
+                st.markdown(f"**{col}** — {info['dtype']}, unique={info['num_unique']}, missing={info['num_missing']}")
         else:
-            st.warning("⚠️ Column suggestions are not available for this dataset.")
+            st.info("Column suggestions not available for this dataset.")
 
-    # --- Smart Filters ---
+    # -------------------------
+    # Smart filters
+    # -------------------------
     st.markdown("### 🎛️ Filters")
-
+    # initialize filtered_df so it's always defined
     filtered_df = df.copy()
-    categorical_cols = [col for col in df.columns if df[col].dtype == "object" or df[col].nunique() <= 30]
-    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
 
-    if not categorical_cols and not numeric_cols:
-        st.warning("No suitable filters found for this dataset.")
+    # Determine candidate categorical and numeric columns
+    # Exclude obvious month/value columns from categorical candidates
+    categorical_candidates = []
+    numeric_candidates = []
+    for col in df.columns:
+        try:
+            if is_month_col_name(col) or looks_like_value_column(df[col]):
+                # don't present these as categorical filters
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    numeric_candidates.append(col)
+                else:
+                    # treat as numeric-like (skip categorical)
+                    numeric_candidates.append(col)
+            else:
+                # candidate for categorical filter if not too many uniques
+                n_unique = df[col].nunique(dropna=True)
+                if n_unique <= 200 and (df[col].dtype == "object" or n_unique <= 50):
+                    categorical_candidates.append(col)
+                elif pd.api.types.is_numeric_dtype(df[col]):
+                    numeric_candidates.append(col)
+        except Exception:
+            continue
+
+    if not categorical_candidates and not numeric_candidates:
+        st.info("No suitable filters found for this dataset.")
     else:
-        with st.expander("Show filter options"):
-            # Categorical filters (like State, Year)
-            for col in categorical_cols:
-                unique_vals = df[col].dropna().astype(str).unique().tolist()
-                # Skip columns where unique values look like numeric data
-                if all(v.replace('.', '', 1).isdigit() for v in unique_vals):
+        with st.expander("Show filter options", expanded=False):
+            # Categorical filters (multiselect) — defaults to empty so not preselecting everything
+            for col in categorical_candidates:
+                try:
+                    options = df[col].dropna().astype(str).unique().tolist()
+                    options = sorted(options, key=lambda x: (str(x).lower()))
+                    if len(options) <= 500:  # safety guard
+                        sel = st.multiselect(f"{col}", options, default=[], key=f"filter_{col}")
+                        if sel:
+                            filtered_df = filtered_df[filtered_df[col].astype(str).isin(sel)]
+                except Exception:
                     continue
-                sel = st.multiselect(f"{col}", unique_vals, default=[], key=f"filter_{col}")
-                if sel:
-                    filtered_df = filtered_df[filtered_df[col].astype(str).isin(sel)]
 
-            # Numeric filters (like Rainfall amount, Production)
-            for col in numeric_cols:
-                min_val = float(df[col].min())
-                max_val = float(df[col].max())
-                sel_range = st.slider(f"{col} Range", min_val, max_val, (min_val, max_val), key=f"slider_{col}")
-                if sel_range != (min_val, max_val):
-                    filtered_df = filtered_df[(df[col] >= sel_range[0]) & (df[col] <= sel_range[1])]
+            # Numeric filters (sliders)
+            for col in numeric_candidates:
+                try:
+                    # numeric columns may be floats/ints stored as strings — try to coerce where possible
+                    ser = pd.to_numeric(df[col], errors="coerce") if not pd.api.types.is_numeric_dtype(df[col]) else df[col]
+                    if ser.dropna().empty:
+                        continue
+                    min_val = float(ser.min())
+                    max_val = float(ser.max())
+                    if min_val == max_val:
+                        continue
+                    sel_range = st.slider(f"{col} range", min_val, max_val, (min_val, max_val), key=f"slider_{col}")
+                    # apply only if slider moved
+                    if sel_range != (min_val, max_val):
+                        filtered_df = filtered_df[(pd.to_numeric(filtered_df[col], errors="coerce") >= sel_range[0]) &
+                                                  (pd.to_numeric(filtered_df[col], errors="coerce") <= sel_range[1])]
+                except Exception:
+                    continue
 
-    # --- Results display ---
+    # store filtered_df into session (optional)
+    st.session_state["filtered_df"] = filtered_df
+
+    # -------------------------
+    # Results & download
+    # -------------------------
     st.markdown("### 🔹 Filtered Results")
     if filtered_df.empty:
         st.warning("No records match the selected filters.")
     else:
         st.dataframe(filtered_df)
 
-    # --- Download option ---
     csv = filtered_df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download results as CSV",
-        data=csv,
-        file_name=f"{selected_dataset.replace(' ', '_')}_results.csv",
-        mime="text/csv",
-        key="download_btn"
-    )
+    st.download_button("Download results as CSV",
+                       data=csv,
+                       file_name=f"{selected_dataset.replace(' ', '_')}_results.csv",
+                       mime="text/csv",
+                       key="download_btn")
 
-    # --- Dataset comparison ---
-    st.markdown("### 🔍 Compare with another dataset")
+    # -------------------------
+    # Robust comparison
+    # -------------------------
+    st.markdown("### 🔍 Compare with another dataset (Optional)")
     compare_choice = st.selectbox("Compare with:", ["None"] + list(DATASETS.keys()), key="compare_select")
     if compare_choice != "None":
         compare_id = DATASETS[compare_choice]
         with st.spinner(f"Fetching comparison dataset: {compare_choice} ..."):
             df2, _ = fetch_from_api(compare_id)
+
         if df2 is not None and not df2.empty:
             try:
-                comparison_result = compare_states(filtered_df, df2)
-                st.dataframe(comparison_result)
+                # do not mutate original df names: create normalized copies for matching
+                df_norm = df.copy()
+                df2_norm = df2.copy()
+                df_norm.columns = [c.strip().lower() for c in df_norm.columns]
+                df2_norm.columns = [c.strip().lower() for c in df2_norm.columns]
+
+                common_cols = list(set(df_norm.columns).intersection(set(df2_norm.columns)))
+                if not common_cols:
+                    st.error("❌ No common columns found between the two datasets. Showing side-by-side preview instead.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.write(f"**{selected_dataset}** preview")
+                        st.dataframe(df.head(50))
+                    with c2:
+                        st.write(f"**{compare_choice}** preview")
+                        st.dataframe(df2.head(50))
+                else:
+                    st.info(f"Common columns: {', '.join(common_cols[:10])}")
+                    # prefer year-like columns for merge
+                    pref = next((c for c in ["year", "yr"] if c in common_cols), None)
+                    key_col = pref if pref else common_cols[0]
+                    # merge using normalized column name, but show readable results
+                    merged = pd.merge(df_norm, df2_norm, on=key_col, how="inner", suffixes=("_left", "_right"))
+                    if merged.empty:
+                        st.warning("Merge resulted in no rows. Showing side-by-side preview.")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.dataframe(df.head(50))
+                        with c2:
+                            st.dataframe(df2.head(50))
+                    else:
+                        st.success(f"✅ Merged on `{key_col}` — showing first 100 rows")
+                        st.dataframe(merged.head(100))
             except Exception as e:
                 st.error(f"Error while comparing: {e}")
         else:
             st.error("Could not fetch the comparison dataset.")
 
-# --- Footer ---
+# -------------------------
+# Footer
+# -------------------------
 st.markdown("---")
 st.caption("Powered by data.gov.in | Built with ❤️ using Streamlit")
