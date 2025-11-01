@@ -34,7 +34,7 @@ DATASETS = {
 # -------------------------
 # Page config & small CSS
 # -------------------------
-st.set_page_config(page_title="Project-Samarth: An AI driven Q&A system", layout="wide")
+st.set_page_config(page_title="Project-Samarth", layout="wide")
 st.markdown(
     """
     <style>
@@ -44,7 +44,8 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-st.title("📊 Data Portal Viewer")
+st.title("🚀 Project Samarth")
+st.markdown("_An intelligent data exploration platform powered by open government datasets._")
 
 # -------------------------
 # Helpers
