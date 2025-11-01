@@ -101,4 +101,31 @@ if st.button("Fetch Data", key="fetch_btn"):
         # --- Download filtered data ---
         csv = filtered_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="Download Filtered Data
+            label="Download Filtered Data as CSV",
+            data=csv,
+            file_name=f"{selected_dataset.replace(' ', '_')}_filtered.csv",
+            mime="text/csv"
+        )
+
+        # --- Optional comparison ---
+        st.markdown("### 🔍 Compare with Another Dataset (Optional)")
+        compare_choice = st.selectbox("Select another dataset to compare:", ["None"] + list(DATASETS.keys()))
+        if compare_choice != "None":
+            compare_id = DATASETS[compare_choice]
+            with st.spinner(f"Fetching comparison dataset: {compare_choice}..."):
+                df2, _ = fetch_from_api(compare_id)
+            if df2 is not None and not df2.empty:
+                st.info(f"Comparing **{selected_dataset}** and **{compare_choice}** ...")
+                try:
+                    comparison_result = compare_states(filtered_df, df2)
+                    st.dataframe(comparison_result)
+                except Exception as e:
+                    st.error(f"Error during comparison: {e}")
+            else:
+                st.error("❌ Could not fetch comparison dataset.")
+    else:
+        st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
+
+# --- Footer ---
+st.markdown("---")
+st.caption("Powered by data.gov.in | Built with ❤️ using Streamlit")
