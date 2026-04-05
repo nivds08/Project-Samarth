@@ -7,3 +7,4 @@ __pycache__/
 # Ignore virtual environment folders if any
 venv/
 env/
+.env
