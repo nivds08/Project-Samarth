@@ -4,6 +4,7 @@ import os
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
+from pandas.api.types import is_numeric_dtype
 
 # make src importable
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
@@ -38,14 +39,50 @@ st.set_page_config(page_title="Project-Samarth", layout="wide")
 st.markdown(
     """
     <style>
+    /* Brighter, cleaner app shell */
+    .stApp {
+        background: linear-gradient(180deg, #f7faff 0%, #eef6ff 100%);
+    }
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    h1, h2, h3 {
+        color: #0f2a56;
+    }
     /* pointer on selectboxes */
-    div[data-baseweb="select"] > div { cursor: pointer !important; }
+    div[data-baseweb="select"] > div {
+        cursor: pointer !important;
+        border-radius: 10px;
+        border-color: #9dc4ff !important;
+    }
+    /* Section cards */
+    .samarth-card {
+        background: #ffffff;
+        border: 1px solid #dbe9ff;
+        border-radius: 14px;
+        padding: 14px 16px;
+        box-shadow: 0 6px 18px rgba(64, 124, 214, 0.08);
+    }
+    /* Buttons */
+    .stButton > button, .stDownloadButton > button {
+        background: linear-gradient(90deg, #1f77ff 0%, #3d8bff 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 10px !important;
+        font-weight: 600 !important;
+    }
+    .stButton > button:hover, .stDownloadButton > button:hover {
+        filter: brightness(1.08);
+        transform: translateY(-1px);
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 st.title("🚀 Project Samarth")
 st.markdown("_An intelligent data exploration platform powered by open government datasets._")
+st.markdown('<div class="samarth-card">Use smart filters to narrow results quickly and export only what matters.</div>', unsafe_allow_html=True)
 
 # -------------------------
 # Helpers
@@ -72,6 +109,75 @@ def looks_like_value_column(series: pd.Series) -> bool:
     except Exception:
         pass
     return False
+
+def normalize_text(value):
+    """Normalize values for resilient, case-insensitive categorical matching."""
+    if pd.isna(value):
+        return None
+    text = str(value).strip()
+    return text.casefold() if text else None
+
+def build_filter_candidates(df: pd.DataFrame):
+    categorical_candidates = []
+    numeric_candidates = []
+    skipped_columns = []
+
+    for col in df.columns:
+        try:
+            series = df[col]
+            n_unique = series.nunique(dropna=True)
+            if n_unique == 0:
+                skipped_columns.append((col, "all values missing"))
+                continue
+
+            if is_month_col_name(col) or looks_like_value_column(series):
+                numeric_candidates.append(col)
+                continue
+
+            if n_unique <= 200 and (series.dtype == "object" or n_unique <= 50):
+                categorical_candidates.append(col)
+            elif is_numeric_dtype(series):
+                numeric_candidates.append(col)
+            else:
+                skipped_columns.append((col, f"high cardinality ({n_unique} unique)"))
+        except Exception as err:
+            skipped_columns.append((col, f"analysis error: {err}"))
+
+    return categorical_candidates, numeric_candidates, skipped_columns
+
+def apply_categorical_filter(dataframe: pd.DataFrame, column: str, selected_values):
+    if not selected_values:
+        return dataframe, None
+
+    try:
+        normalized_selected = {normalize_text(v) for v in selected_values if normalize_text(v) is not None}
+        if not normalized_selected:
+            return dataframe, f"Skipped `{column}` because no valid filter values were selected."
+
+        normalized_column = dataframe[column].map(normalize_text)
+        mask = normalized_column.isin(normalized_selected)
+        return dataframe[mask], None
+    except KeyError:
+        return dataframe, f"Skipped `{column}` because the column is missing after previous filter operations."
+    except Exception as err:
+        return dataframe, f"Could not apply categorical filter on `{column}`: {err}"
+
+def apply_numeric_filter(dataframe: pd.DataFrame, column: str, selected_range):
+    try:
+        numeric_series = pd.to_numeric(dataframe[column], errors="coerce")
+        if numeric_series.dropna().empty:
+            return dataframe, f"Skipped numeric filter for `{column}` because values are not numeric."
+
+        low, high = selected_range
+        if low > high:
+            return dataframe, f"Skipped `{column}` due to invalid range ({low} > {high})."
+
+        mask = numeric_series.between(low, high, inclusive="both")
+        return dataframe[mask], None
+    except KeyError:
+        return dataframe, f"Skipped `{column}` because the column is missing after previous filter operations."
+    except Exception as err:
+        return dataframe, f"Could not apply numeric filter on `{column}`: {err}"
 
 # -------------------------
 # Dataset selection
@@ -119,27 +225,8 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
     filtered_df = df.copy()
 
     # Determine candidate categorical and numeric columns
-    # Exclude obvious month/value columns from categorical candidates
-    categorical_candidates = []
-    numeric_candidates = []
-    for col in df.columns:
-        try:
-            if is_month_col_name(col) or looks_like_value_column(df[col]):
-                # don't present these as categorical filters
-                if pd.api.types.is_numeric_dtype(df[col]):
-                    numeric_candidates.append(col)
-                else:
-                    # treat as numeric-like (skip categorical)
-                    numeric_candidates.append(col)
-            else:
-                # candidate for categorical filter if not too many uniques
-                n_unique = df[col].nunique(dropna=True)
-                if n_unique <= 200 and (df[col].dtype == "object" or n_unique <= 50):
-                    categorical_candidates.append(col)
-                elif pd.api.types.is_numeric_dtype(df[col]):
-                    numeric_candidates.append(col)
-        except Exception:
-            continue
+    categorical_candidates, numeric_candidates, skipped_columns = build_filter_candidates(df)
+    filter_errors = []
 
     if not categorical_candidates and not numeric_candidates:
         st.info("No suitable filters found for this dataset.")
@@ -153,15 +240,21 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
                     if len(options) <= 500:  # safety guard
                         sel = st.multiselect(f"{col}", options, default=[], key=f"filter_{col}")
                         if sel:
-                            filtered_df = filtered_df[filtered_df[col].astype(str).isin(sel)]
-                except Exception:
-                    continue
+                            filtered_df, err = apply_categorical_filter(filtered_df, col, sel)
+                            if err:
+                                filter_errors.append(err)
+                    else:
+                        filter_errors.append(
+                            f"Skipped `{col}` because it has too many options ({len(options)} unique values)."
+                        )
+                except Exception as err:
+                    filter_errors.append(f"Could not render categorical filter `{col}`: {err}")
 
             # Numeric filters (sliders)
             for col in numeric_candidates:
                 try:
                     # numeric columns may be floats/ints stored as strings — try to coerce where possible
-                    ser = pd.to_numeric(df[col], errors="coerce") if not pd.api.types.is_numeric_dtype(df[col]) else df[col]
+                    ser = pd.to_numeric(df[col], errors="coerce") if not is_numeric_dtype(df[col]) else df[col]
                     if ser.dropna().empty:
                         continue
                     min_val = float(ser.min())
@@ -171,10 +264,21 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
                     sel_range = st.slider(f"{col} range", min_val, max_val, (min_val, max_val), key=f"slider_{col}")
                     # apply only if slider moved
                     if sel_range != (min_val, max_val):
-                        filtered_df = filtered_df[(pd.to_numeric(filtered_df[col], errors="coerce") >= sel_range[0]) &
-                                                  (pd.to_numeric(filtered_df[col], errors="coerce") <= sel_range[1])]
-                except Exception:
-                    continue
+                        filtered_df, err = apply_numeric_filter(filtered_df, col, sel_range)
+                        if err:
+                            filter_errors.append(err)
+                except Exception as err:
+                    filter_errors.append(f"Could not render numeric filter `{col}`: {err}")
+
+    if skipped_columns:
+        with st.expander("ℹ️ Filter diagnostics", expanded=False):
+            for col_name, reason in skipped_columns:
+                st.caption(f"Skipped `{col_name}`: {reason}")
+    if filter_errors:
+        st.warning("Some filters were skipped due to edge cases.")
+        with st.expander("View filter warnings", expanded=False):
+            for message in filter_errors:
+                st.write(f"- {message}")
 
     # store filtered_df into session (optional)
     st.session_state["filtered_df"] = filtered_df
@@ -186,6 +290,7 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
     if filtered_df.empty:
         st.warning("No records match the selected filters.")
     else:
+        st.caption(f"Showing {len(filtered_df)} of {len(df)} rows after filtering.")
         st.dataframe(filtered_df)
 
     csv = filtered_df.to_csv(index=False).encode("utf-8")
