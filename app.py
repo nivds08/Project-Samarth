@@ -3,8 +3,12 @@ import sys
 import os
 import streamlit as st
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 from pandas.api.types import is_numeric_dtype
+from sklearn.linear_model import LinearRegression
+from scipy.stats import linregress
 
 # make src importable
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
@@ -179,6 +183,67 @@ def apply_numeric_filter(dataframe: pd.DataFrame, column: str, selected_range):
     except Exception as err:
         return dataframe, f"Could not apply numeric filter on `{column}`: {err}"
 
+def find_column_by_keywords(df: pd.DataFrame, keywords, prefer_numeric=False):
+    matches = []
+    for col in df.columns:
+        col_norm = str(col).strip().lower()
+        if any(k in col_norm for k in keywords):
+            matches.append(col)
+    if not matches:
+        return None
+    if prefer_numeric:
+        numeric_matches = [c for c in matches if is_numeric_dtype(df[c])]
+        if numeric_matches:
+            return numeric_matches[0]
+    return matches[0]
+
+def prepare_rainfall_columns(df: pd.DataFrame):
+    year_col = find_column_by_keywords(df, ["year", "yr"])
+    rainfall_col = find_column_by_keywords(df, ["rain", "rainfall", "precip"], prefer_numeric=True)
+    region_col = (
+        find_column_by_keywords(df, ["district", "dist"]) or
+        find_column_by_keywords(df, ["state", "st_name", "state_name"]) or
+        find_column_by_keywords(df, ["subdivision", "sub_division", "sub-division"])
+    )
+    return year_col, rainfall_col, region_col
+
+def prepare_crop_columns(df: pd.DataFrame):
+    year_col = find_column_by_keywords(df, ["year", "yr"])
+    crop_col = find_column_by_keywords(df, ["crop", "commodity", "item"])
+    yield_col = find_column_by_keywords(df, ["yield"], prefer_numeric=True)
+    if yield_col is None:
+        yield_col = find_column_by_keywords(df, ["production", "prod"], prefer_numeric=True)
+    region_col = (
+        find_column_by_keywords(df, ["district", "dist"]) or
+        find_column_by_keywords(df, ["state", "st_name", "state_name"])
+    )
+    return year_col, crop_col, yield_col, region_col
+
+@st.cache_data(show_spinner=False)
+def get_analysis_dataset(resource_id: str):
+    fetched_df, _ = fetch_from_api(resource_id)
+    return fetched_df
+
+def correlation_interpretation(score: float) -> str:
+    if score > 0.7:
+        return "Strong positive correlation"
+    if 0.4 <= score <= 0.7:
+        return "Moderate positive correlation"
+    return "Weak or no significant correlation"
+
+def render_mapping_debug(title: str, mapping: dict):
+    st.markdown(f"**{title}**")
+    debug_df = pd.DataFrame(
+        [{"Field": k, "Detected Column": (v if v else "Not detected")} for k, v in mapping.items()]
+    )
+    st.dataframe(debug_df, use_container_width=True, hide_index=True)
+
+def missing_fields_message(field_map: dict) -> str:
+    missing = [name for name, value in field_map.items() if not value]
+    if not missing:
+        return ""
+    return ", ".join(missing)
+
 # -------------------------
 # Dataset selection
 # -------------------------
@@ -284,14 +349,278 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
     st.session_state["filtered_df"] = filtered_df
 
     # -------------------------
-    # Results & download
+    # Column mapping debug
+    # -------------------------
+    current_rain_year, current_rainfall, current_rain_region = prepare_rainfall_columns(filtered_df)
+    current_crop_year, current_crop_name, current_crop_yield, current_crop_region = prepare_crop_columns(filtered_df)
+    with st.expander("🧭 Column Mapping Debug", expanded=False):
+        st.caption("Shows auto-detected columns used by charts, correlation, and prediction features.")
+
+        render_mapping_debug(
+            "Current Filtered Dataset",
+            {
+                "Rainfall Year": current_rain_year,
+                "Rainfall Value": current_rainfall,
+                "Rainfall Region": current_rain_region,
+                "Crop Year": current_crop_year,
+                "Crop Name": current_crop_name,
+                "Crop Yield/Production": current_crop_yield,
+                "Crop Region": current_crop_region,
+            },
+        )
+
+        try:
+            debug_rain_df = get_analysis_dataset(DATASETS["District-rainfall"])
+            debug_crop_df = get_analysis_dataset(DATASETS["District Crop Production (1997)"])
+
+            if debug_rain_df is not None and not debug_rain_df.empty:
+                debug_rain_year, debug_rainfall, debug_rain_region = prepare_rainfall_columns(debug_rain_df)
+                render_mapping_debug(
+                    "Correlation Source: District-rainfall",
+                    {
+                        "Rainfall Year": debug_rain_year,
+                        "Rainfall Value": debug_rainfall,
+                        "Region (District/State)": debug_rain_region,
+                    },
+                )
+            else:
+                st.warning("Could not load `District-rainfall` for mapping debug.")
+
+            if debug_crop_df is not None and not debug_crop_df.empty:
+                debug_crop_year, debug_crop_name, debug_crop_yield, debug_crop_region = prepare_crop_columns(debug_crop_df)
+                render_mapping_debug(
+                    "Correlation Source: District Crop Production (1997)",
+                    {
+                        "Crop Year": debug_crop_year,
+                        "Crop Name": debug_crop_name,
+                        "Crop Yield/Production": debug_crop_yield,
+                        "Region (District/State)": debug_crop_region,
+                    },
+                )
+            else:
+                st.warning("Could not load `District Crop Production (1997)` for mapping debug.")
+        except Exception as debug_err:
+            st.warning(f"Mapping debug for correlation sources is unavailable: {debug_err}")
+
+    # -------------------------
+    # Results, visualizations, analysis
     # -------------------------
     st.markdown("### 🔹 Filtered Results")
-    if filtered_df.empty:
-        st.warning("No records match the selected filters.")
-    else:
-        st.caption(f"Showing {len(filtered_df)} of {len(df)} rows after filtering.")
-        st.dataframe(filtered_df)
+    table_tab, chart_tab = st.tabs(["Table View", "Chart View"])
+
+    with table_tab:
+        if filtered_df.empty:
+            st.warning("No records match the selected filters.")
+        else:
+            st.caption(f"Showing {len(filtered_df)} of {len(df)} rows after filtering.")
+            st.dataframe(filtered_df)
+
+    with chart_tab:
+        if filtered_df.empty:
+            st.warning("No records available to visualize. Adjust filters and try again.")
+        else:
+            with st.expander("📈 Visualizations", expanded=False):
+                rain_year_col, rain_value_col, _ = prepare_rainfall_columns(filtered_df)
+                crop_year_col, crop_name_col, crop_yield_col, _ = prepare_crop_columns(filtered_df)
+
+                if rain_year_col and rain_value_col:
+                    rain_plot_df = filtered_df[[rain_year_col, rain_value_col]].copy()
+                    rain_plot_df[rain_year_col] = pd.to_numeric(rain_plot_df[rain_year_col], errors="coerce")
+                    rain_plot_df[rain_value_col] = pd.to_numeric(rain_plot_df[rain_value_col], errors="coerce")
+                    rain_plot_df = rain_plot_df.dropna().sort_values(rain_year_col)
+                    if not rain_plot_df.empty:
+                        rain_trend = rain_plot_df.groupby(rain_year_col, as_index=False)[rain_value_col].mean()
+                        fig, ax = plt.subplots(figsize=(10, 4))
+                        ax.plot(rain_trend[rain_year_col], rain_trend[rain_value_col], marker="o", label="Rainfall trend")
+                        ax.set_title("Rainfall Trend Over Years")
+                        ax.set_xlabel("Year")
+                        ax.set_ylabel("Rainfall")
+                        ax.legend()
+                        ax.grid(alpha=0.3)
+                        st.pyplot(fig)
+                    else:
+                        st.warning("Rainfall trend chart needs valid numeric year and rainfall values.")
+                else:
+                    missing_msg = missing_fields_message(
+                        {"Rainfall Year": rain_year_col, "Rainfall Value": rain_value_col}
+                    )
+                    st.error(
+                        f"Rainfall trend chart unavailable. Missing required mapping(s): {missing_msg}. "
+                        "Check `Column Mapping Debug`."
+                    )
+
+                if crop_name_col and crop_yield_col:
+                    crop_plot_df = filtered_df[[crop_name_col, crop_yield_col]].copy()
+                    crop_plot_df[crop_yield_col] = pd.to_numeric(crop_plot_df[crop_yield_col], errors="coerce")
+                    crop_plot_df = crop_plot_df.dropna()
+                    if not crop_plot_df.empty:
+                        crop_compare = (
+                            crop_plot_df.groupby(crop_name_col, as_index=False)[crop_yield_col]
+                            .mean()
+                            .sort_values(crop_yield_col, ascending=False)
+                            .head(15)
+                        )
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        ax.bar(crop_compare[crop_name_col].astype(str), crop_compare[crop_yield_col], label="Average yield")
+                        ax.set_title("Crop Yield Comparison Across Crops")
+                        ax.set_xlabel("Crop")
+                        ax.set_ylabel("Yield")
+                        ax.legend()
+                        ax.tick_params(axis="x", rotation=45)
+                        ax.grid(axis="y", alpha=0.3)
+                        st.pyplot(fig)
+                    else:
+                        st.warning("Crop yield comparison needs valid crop names and numeric yield values.")
+                else:
+                    missing_msg = missing_fields_message(
+                        {"Crop Name": crop_name_col, "Crop Yield/Production": crop_yield_col}
+                    )
+                    st.error(
+                        f"Crop yield chart unavailable. Missing required mapping(s): {missing_msg}. "
+                        "Check `Column Mapping Debug`."
+                    )
+
+    with st.expander("🔗 Correlation Analysis (Rainfall vs Crop Yield)", expanded=False):
+        st.caption("Merges standard rainfall and crop datasets by year and district/state to estimate correlation.")
+        try:
+            rainfall_df = get_analysis_dataset(DATASETS["District-rainfall"])
+            crop_df = get_analysis_dataset(DATASETS["District Crop Production (1997)"])
+
+            if rainfall_df is None or rainfall_df.empty or crop_df is None or crop_df.empty:
+                st.warning("Insufficient source data for correlation analysis. Please try again later.")
+            else:
+                rain_year_col, rain_value_col, rain_region_col = prepare_rainfall_columns(rainfall_df)
+                crop_year_col, _, crop_yield_col, crop_region_col = prepare_crop_columns(crop_df)
+
+                if not all([rain_year_col, rain_value_col, crop_year_col, crop_yield_col]):
+                    missing_msg = missing_fields_message(
+                        {
+                            "Rainfall Year": rain_year_col,
+                            "Rainfall Value": rain_value_col,
+                            "Crop Year": crop_year_col,
+                            "Crop Yield/Production": crop_yield_col,
+                        }
+                    )
+                    st.error(
+                        f"Correlation analysis unavailable. Missing required mapping(s): {missing_msg}. "
+                        "Check `Column Mapping Debug`."
+                    )
+                else:
+                    rainfall_work = rainfall_df.copy()
+                    crop_work = crop_df.copy()
+                    rainfall_work[rain_year_col] = pd.to_numeric(rainfall_work[rain_year_col], errors="coerce")
+                    rainfall_work[rain_value_col] = pd.to_numeric(rainfall_work[rain_value_col], errors="coerce")
+                    crop_work[crop_year_col] = pd.to_numeric(crop_work[crop_year_col], errors="coerce")
+                    crop_work[crop_yield_col] = pd.to_numeric(crop_work[crop_yield_col], errors="coerce")
+
+                    if rain_region_col and crop_region_col:
+                        rainfall_work[rain_region_col] = rainfall_work[rain_region_col].astype(str).str.strip().str.casefold()
+                        crop_work[crop_region_col] = crop_work[crop_region_col].astype(str).str.strip().str.casefold()
+                        rain_agg = rainfall_work.groupby([rain_year_col, rain_region_col], as_index=False)[rain_value_col].mean()
+                        crop_agg = crop_work.groupby([crop_year_col, crop_region_col], as_index=False)[crop_yield_col].mean()
+                        merged_corr = pd.merge(
+                            rain_agg,
+                            crop_agg,
+                            left_on=[rain_year_col, rain_region_col],
+                            right_on=[crop_year_col, crop_region_col],
+                            how="inner",
+                        )
+                    else:
+                        rain_agg = rainfall_work.groupby(rain_year_col, as_index=False)[rain_value_col].mean()
+                        crop_agg = crop_work.groupby(crop_year_col, as_index=False)[crop_yield_col].mean()
+                        merged_corr = pd.merge(
+                            rain_agg,
+                            crop_agg,
+                            left_on=rain_year_col,
+                            right_on=crop_year_col,
+                            how="inner",
+                        )
+
+                    merged_corr = merged_corr[[rain_value_col, crop_yield_col]].dropna()
+                    if len(merged_corr) < 3:
+                        st.warning("Not enough merged records to calculate a reliable correlation.")
+                    else:
+                        corr_score = merged_corr[[rain_value_col, crop_yield_col]].corr().iloc[0, 1]
+                        x_vals = merged_corr[rain_value_col].values
+                        y_vals = merged_corr[crop_yield_col].values
+                        line = linregress(x_vals, y_vals)
+                        x_line = np.linspace(np.min(x_vals), np.max(x_vals), 100)
+                        y_line = line.slope * x_line + line.intercept
+
+                        fig, ax = plt.subplots(figsize=(8, 5))
+                        ax.scatter(x_vals, y_vals, alpha=0.7, label="Observed points")
+                        ax.plot(x_line, y_line, color="crimson", linestyle="--", label="Trend line")
+                        ax.set_title("Rainfall vs Crop Yield Correlation")
+                        ax.set_xlabel("Rainfall")
+                        ax.set_ylabel("Crop Yield")
+                        ax.legend()
+                        ax.grid(alpha=0.25)
+                        st.pyplot(fig)
+
+                        st.metric("Pearson Correlation", f"{corr_score:.3f}")
+                        st.write(f"Interpretation: **{correlation_interpretation(float(corr_score))}**")
+        except Exception as analysis_err:
+            st.warning(f"Could not complete correlation analysis: {analysis_err}")
+
+    with st.expander("🤖 Rainfall Prediction (Linear Regression)", expanded=False):
+        if filtered_df.empty:
+            st.warning("No filtered data available for prediction.")
+        else:
+            pred_year_col, pred_rain_col, _ = prepare_rainfall_columns(filtered_df)
+            if not pred_year_col or not pred_rain_col:
+                missing_msg = missing_fields_message(
+                    {"Rainfall Year": pred_year_col, "Rainfall Value": pred_rain_col}
+                )
+                st.error(
+                    f"Prediction unavailable. Missing required mapping(s): {missing_msg}. "
+                    "Check `Column Mapping Debug`."
+                )
+            else:
+                pred_df = filtered_df[[pred_year_col, pred_rain_col]].copy()
+                pred_df[pred_year_col] = pd.to_numeric(pred_df[pred_year_col], errors="coerce")
+                pred_df[pred_rain_col] = pd.to_numeric(pred_df[pred_rain_col], errors="coerce")
+                pred_df = pred_df.dropna().sort_values(pred_year_col)
+                yearly_rain = pred_df.groupby(pred_year_col, as_index=False)[pred_rain_col].mean()
+
+                if len(yearly_rain) < 3:
+                    st.warning("At least 3 yearly rainfall records are required to train the prediction model.")
+                else:
+                    model = LinearRegression()
+                    X_train = yearly_rain[[pred_year_col]].values
+                    y_train = yearly_rain[pred_rain_col].values
+                    model.fit(X_train, y_train)
+
+                    max_year = int(yearly_rain[pred_year_col].max())
+                    future_years = np.array([max_year + 1, max_year + 2, max_year + 3]).reshape(-1, 1)
+                    predictions = model.predict(future_years)
+
+                    fig, ax = plt.subplots(figsize=(10, 5))
+                    ax.plot(
+                        yearly_rain[pred_year_col],
+                        yearly_rain[pred_rain_col],
+                        marker="o",
+                        linestyle="-",
+                        label="Historical rainfall",
+                    )
+                    ax.plot(
+                        future_years.flatten(),
+                        predictions,
+                        marker="o",
+                        linestyle="--",
+                        color="orange",
+                        label="Predicted rainfall",
+                    )
+                    ax.set_title("Historical and Predicted Rainfall")
+                    ax.set_xlabel("Year")
+                    ax.set_ylabel("Rainfall")
+                    ax.legend()
+                    ax.grid(alpha=0.3)
+                    st.pyplot(fig)
+
+                    metric_cols = st.columns(3)
+                    for idx, year in enumerate(future_years.flatten()):
+                        metric_cols[idx].metric(f"Predicted Rainfall ({int(year)})", f"{predictions[idx]:.2f}")
+                    st.caption("Prediction based on linear trend of historical data. Actual values may vary.")
 
     csv = filtered_df.to_csv(index=False).encode("utf-8")
     st.download_button("Download results as CSV",
