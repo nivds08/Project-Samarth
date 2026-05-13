@@ -30,8 +30,20 @@ Set `API_KEY` in the Railway dashboard for the project.
 ## Notes
 
 - **Port**: The Dockerfile uses `$PORT` (Railway sets this automatically).
+- **Config as code**: Root [`railway.toml`](railway.toml) sets `builder = "DOCKERFILE"` so Railway uses this image (not Railpack/Nixpacks guessing).
 - **Build context**: Only `app.py`, `main.py`, `requirements.txt`, and `src/` are copied into the image (see `.dockerignore`).
 - **Optional entry**: `main.py` is included if you want to change the Dockerfile `CMD` to run `main.py` instead of `app.py`.
+
+## “Application failed to respond” (Railway error page)
+
+That page means the **edge proxy could not get a healthy HTTP response** from your container. Common causes:
+
+1. **Process crashed on startup** — Open **Deployments → latest deploy → View logs** (build + deploy). Look for `ModuleNotFoundError`, `Traceback`, or exit code non-zero.
+2. **Wrong start command in dashboard** — In the Railway service, **Settings → Deploy → Custom Start Command** should be **empty** so the **Dockerfile `CMD`** runs (Streamlit on `$PORT` and `0.0.0.0`). If you set something like `python app.py`, remove it.
+3. **Headless matplotlib** — The app sets `matplotlib.use("Agg")` before `pyplot` so charts work on Linux servers without a display.
+4. **Cold start** — First request after sleep can take 30–60s; refresh once or check logs until you see `You can now view your Streamlit app`.
+
+After fixing, **Redeploy** from the latest commit.
 
 ## If you truly want “not Streamlit”
 

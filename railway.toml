@@ -1,0 +1,5 @@
+# Force Docker build so Streamlit starts with the correct CMD (binds $PORT on 0.0.0.0).
+# In Railway dashboard: Service → Settings → confirm builder is Dockerfile if deploy still fails.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"

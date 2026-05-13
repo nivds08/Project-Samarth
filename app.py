@@ -4,6 +4,9 @@ import os
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib
+
+matplotlib.use("Agg")  # headless servers (Railway/Docker) — must be before pyplot
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 from pandas.api.types import is_numeric_dtype
