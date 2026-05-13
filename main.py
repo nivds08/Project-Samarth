@@ -44,7 +44,7 @@ selected_dataset = st.selectbox("Choose a dataset:", list(DATASETS.keys()))
 if st.button("Fetch Data"):
     resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
-        df, col_suggestions = fetch_from_api(resource_id)
+        df, col_suggestions, fetch_error = fetch_from_api(resource_id)
 
     if df is not None and not df.empty:
         st.success(f"✅ Successfully fetched {len(df)} records!")
@@ -80,7 +80,7 @@ if st.button("Fetch Data"):
         if compare_choice != "None":
             compare_id = DATASETS[compare_choice]
             with st.spinner(f"Fetching comparison dataset: {compare_choice}..."):
-                df2, _ = fetch_from_api(compare_id)
+                df2, _, compare_error = fetch_from_api(compare_id)
 
             if df2 is not None and not df2.empty:
                 st.info(f"Comparing **{selected_dataset}** and **{compare_choice}** ...")
@@ -91,8 +91,14 @@ if st.button("Fetch Data"):
                     st.error(f"Error during comparison: {e}")
             else:
                 st.error("❌ Could not fetch comparison dataset.")
+                if compare_error:
+                    with st.expander("View fetch error details", expanded=False):
+                        st.write(compare_error)
     else:
-        st.error("❌ Failed to fetch data. Please check the resource ID or API limit.")
+        st.error("❌ Failed to fetch data.")
+        if fetch_error:
+            with st.expander("View fetch error details", expanded=False):
+                st.write(fetch_error)
 
 # 7️⃣ Footer
 st.markdown("---")

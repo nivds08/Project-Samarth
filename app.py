@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from pandas.api.types import is_numeric_dtype
 from sklearn.linear_model import LinearRegression
 from scipy.stats import linregress
+import time
 
 # make src importable
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
@@ -92,8 +93,39 @@ st.markdown('<div class="samarth-card">Use smart filters to narrow results quick
 # Helpers
 # -------------------------
 def clear_fetched_data():
-    for k in ("df", "col_suggestions", "filtered_df"):
+    for k in ("df", "col_suggestions", "filtered_df", "last_fetch_error"):
         st.session_state.pop(k, None)
+
+def render_fetch_error(error: dict | None, *, context: str):
+    if not error:
+        st.error(f"❌ {context} failed, but no error details were provided.")
+        return
+    kind = error.get("kind", "unknown_error")
+    message = error.get("message", "Unknown error")
+    status = error.get("status_code")
+    url = error.get("url")
+    attempt = error.get("attempt")
+    max_retries = error.get("max_retries")
+    timeout_s = error.get("timeout_s")
+
+    headline = f"❌ {context} failed: {kind}"
+    st.error(headline)
+    st.write(message)
+    with st.expander("View technical details", expanded=False):
+        if status is not None:
+            st.write(f"HTTP status: {status}")
+        if url:
+            st.write(f"URL: `{url}`")
+        if attempt is not None and max_retries is not None:
+            st.write(f"Attempt: {attempt} / {max_retries}")
+        if timeout_s is not None:
+            st.write(f"Timeout (seconds): {timeout_s}")
+        preview = error.get("response_preview")
+        if preview:
+            st.code(preview)
+        keys = error.get("top_level_keys")
+        if keys:
+            st.write(f"Top-level JSON keys: {keys}")
 
 def is_month_col_name(col_name: str) -> bool:
     c = col_name.lower()
@@ -197,6 +229,27 @@ def find_column_by_keywords(df: pd.DataFrame, keywords, prefer_numeric=False):
             return numeric_matches[0]
     return matches[0]
 
+def _numeric_candidate_columns(df: pd.DataFrame):
+    candidates = []
+    for c in df.columns:
+        try:
+            ser = pd.to_numeric(df[c], errors="coerce") if not is_numeric_dtype(df[c]) else df[c]
+            non_null = int(ser.notna().sum())
+            if non_null == 0:
+                continue
+            candidates.append((c, non_null))
+        except Exception:
+            continue
+    # Most-filled numeric-like columns first
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return [c for c, _ in candidates]
+
+def _best_numeric_fallback(df: pd.DataFrame, *, exclude_cols: set[str]):
+    for c in _numeric_candidate_columns(df):
+        if c not in exclude_cols:
+            return c
+    return None
+
 def prepare_rainfall_columns(df: pd.DataFrame):
     year_col = find_column_by_keywords(df, ["year", "yr"])
     rainfall_col = find_column_by_keywords(df, ["rain", "rainfall", "precip"], prefer_numeric=True)
@@ -205,6 +258,13 @@ def prepare_rainfall_columns(df: pd.DataFrame):
         find_column_by_keywords(df, ["state", "st_name", "state_name"]) or
         find_column_by_keywords(df, ["subdivision", "sub_division", "sub-division"])
     )
+    # Fallback: some rainfall datasets store totals under generic names (e.g., "annual", "total")
+    if rainfall_col is None:
+        rainfall_col = find_column_by_keywords(df, ["annual", "total", "sum", "value"], prefer_numeric=True)
+    # Final fallback: pick the best-filled numeric column excluding obvious ids
+    if rainfall_col is None:
+        exclude = {c for c in [year_col, region_col] if c}
+        rainfall_col = _best_numeric_fallback(df, exclude_cols=exclude)
     return year_col, rainfall_col, region_col
 
 def prepare_crop_columns(df: pd.DataFrame):
@@ -213,6 +273,11 @@ def prepare_crop_columns(df: pd.DataFrame):
     yield_col = find_column_by_keywords(df, ["yield"], prefer_numeric=True)
     if yield_col is None:
         yield_col = find_column_by_keywords(df, ["production", "prod"], prefer_numeric=True)
+    if yield_col is None:
+        yield_col = find_column_by_keywords(df, ["output", "quantity", "qty", "value", "area"], prefer_numeric=True)
+    if yield_col is None:
+        exclude = {c for c in [year_col, crop_col] if c}
+        yield_col = _best_numeric_fallback(df, exclude_cols=exclude)
     region_col = (
         find_column_by_keywords(df, ["district", "dist"]) or
         find_column_by_keywords(df, ["state", "st_name", "state_name"])
@@ -221,8 +286,8 @@ def prepare_crop_columns(df: pd.DataFrame):
 
 @st.cache_data(show_spinner=False)
 def get_analysis_dataset(resource_id: str):
-    fetched_df, _ = fetch_from_api(resource_id)
-    return fetched_df
+    fetched_df, _, fetch_error = fetch_from_api(resource_id)
+    return fetched_df, fetch_error
 
 def correlation_interpretation(score: float) -> str:
     if score > 0.7:
@@ -246,9 +311,9 @@ def missing_fields_message(field_map: dict) -> str:
 
 def fetch_dataset_with_feedback(resource_id: str, dataset_name: str):
     with st.spinner(f"Loading `{dataset_name}` for analysis..."):
-        fetched = get_analysis_dataset(resource_id)
+        fetched, err = get_analysis_dataset(resource_id)
     if fetched is None or fetched.empty:
-        st.warning(f"Could not load `{dataset_name}` right now. Please retry.")
+        render_fetch_error(err, context=f"Loading `{dataset_name}`")
         return None
     return fetched
 
@@ -262,15 +327,45 @@ if st.session_state.get("last_dataset") != selected_dataset:
     clear_fetched_data()
     st.session_state["last_dataset"] = selected_dataset
 
+# Quick connectivity test (limit=1) to differentiate code bugs vs network blocks
+with st.expander("🔌 API connectivity test", expanded=False):
+    st.caption("Runs a tiny request (limit=1) to check whether data.gov.in is reachable from this machine/network.")
+    if st.button("Test data.gov.in API", key="test_api_btn"):
+        test_id = DATASETS[selected_dataset]
+        start = time.time()
+        with st.spinner("Testing API connectivity..."):
+            test_df, _, test_err = fetch_from_api(test_id, limit=1, timeout_s=20, max_retries=1)
+        elapsed_ms = int((time.time() - start) * 1000)
+        if test_err is None and test_df is not None and not test_df.empty:
+            st.success(f"✅ API reachable. Received {len(test_df)} row(s) in {elapsed_ms} ms.")
+        else:
+            st.warning(f"⚠️ API test did not return records (took {elapsed_ms} ms).")
+            if test_err is None:
+                render_fetch_error(
+                    {
+                        "kind": "no_records",
+                        "message": "The API request succeeded but returned 0 records for this dataset.",
+                    },
+                    context="API connectivity test",
+                )
+            else:
+                render_fetch_error(test_err, context="API connectivity test")
+
 # -------------------------
 # Fetch data button
 # -------------------------
 if st.button("Fetch Data", key="fetch_data_btn"):
     resource_id = DATASETS[selected_dataset]
     with st.spinner(f"Fetching data for **{selected_dataset}**..."):
-        df, col_suggestions = fetch_from_api(resource_id)
+        df, col_suggestions, fetch_error = fetch_from_api(resource_id)
+    if fetch_error is None and (df is None or df.empty):
+        fetch_error = {
+            "kind": "no_records",
+            "message": "The API request succeeded but returned 0 records for this dataset (try another dataset or increase limit).",
+        }
     st.session_state["df"] = df
     st.session_state["col_suggestions"] = col_suggestions
+    st.session_state["last_fetch_error"] = fetch_error
     st.session_state.pop("filtered_df", None)
 
 # -------------------------
@@ -459,6 +554,51 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
                         f"Rainfall trend chart unavailable. Missing required mapping(s): {missing_msg}. "
                         "Check `Column Mapping Debug`."
                     )
+                    st.info("Tip: choose the correct columns manually below.")
+                    manual_year_opts = []
+                    for c in filtered_df.columns:
+                        c_norm = str(c).strip().lower()
+                        if "year" in c_norm or c_norm in {"yr", "year"}:
+                            manual_year_opts.append(c)
+                    manual_year_opts += _numeric_candidate_columns(filtered_df)
+                    manual_year_opts = list(dict.fromkeys(manual_year_opts))
+
+                    manual_val_opts = _numeric_candidate_columns(filtered_df)
+                    manual_val_opts = list(dict.fromkeys(manual_val_opts))
+
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        picked_year = st.selectbox(
+                            "Rainfall chart: pick year column",
+                            options=manual_year_opts,
+                            index=0 if manual_year_opts else None,
+                            key="manual_rain_year_col",
+                        )
+                    with c2:
+                        picked_val = st.selectbox(
+                            "Rainfall chart: pick value column",
+                            options=manual_val_opts,
+                            index=0 if manual_val_opts else None,
+                            key="manual_rain_value_col",
+                        )
+                    if picked_year and picked_val:
+                        try:
+                            rain_plot_df = filtered_df[[picked_year, picked_val]].copy()
+                            rain_plot_df[picked_year] = pd.to_numeric(rain_plot_df[picked_year], errors="coerce")
+                            rain_plot_df[picked_val] = pd.to_numeric(rain_plot_df[picked_val], errors="coerce")
+                            rain_plot_df = rain_plot_df.dropna().sort_values(picked_year)
+                            if not rain_plot_df.empty:
+                                rain_trend = rain_plot_df.groupby(picked_year, as_index=False)[picked_val].mean()
+                                fig, ax = plt.subplots(figsize=(10, 4))
+                                ax.plot(rain_trend[picked_year], rain_trend[picked_val], marker="o", label="Rainfall trend")
+                                ax.set_title("Rainfall Trend Over Years (manual mapping)")
+                                ax.set_xlabel(str(picked_year))
+                                ax.set_ylabel(str(picked_val))
+                                ax.legend()
+                                ax.grid(alpha=0.3)
+                                st.pyplot(fig)
+                        except Exception as e:
+                            st.warning(f"Could not render manual rainfall trend chart: {e}")
 
                 if crop_name_col and crop_yield_col:
                     crop_plot_df = filtered_df[[crop_name_col, crop_yield_col]].copy()
@@ -490,6 +630,55 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
                         f"Crop yield chart unavailable. Missing required mapping(s): {missing_msg}. "
                         "Check `Column Mapping Debug`."
                     )
+                    st.info("Tip: choose the correct columns manually below.")
+                    # Crop name candidates: low-cardinality object columns
+                    name_opts = []
+                    for c in filtered_df.columns:
+                        try:
+                            if filtered_df[c].dtype == "object" and filtered_df[c].nunique(dropna=True) <= 500:
+                                name_opts.append(c)
+                        except Exception:
+                            continue
+                    yield_opts = _numeric_candidate_columns(filtered_df)
+
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        picked_name = st.selectbox(
+                            "Crop chart: pick crop/name column",
+                            options=name_opts,
+                            index=0 if name_opts else None,
+                            key="manual_crop_name_col",
+                        )
+                    with c2:
+                        picked_yield = st.selectbox(
+                            "Crop chart: pick yield/production column",
+                            options=yield_opts,
+                            index=0 if yield_opts else None,
+                            key="manual_crop_yield_col",
+                        )
+                    if picked_name and picked_yield:
+                        try:
+                            crop_plot_df = filtered_df[[picked_name, picked_yield]].copy()
+                            crop_plot_df[picked_yield] = pd.to_numeric(crop_plot_df[picked_yield], errors="coerce")
+                            crop_plot_df = crop_plot_df.dropna()
+                            if not crop_plot_df.empty:
+                                crop_compare = (
+                                    crop_plot_df.groupby(picked_name, as_index=False)[picked_yield]
+                                    .mean()
+                                    .sort_values(picked_yield, ascending=False)
+                                    .head(15)
+                                )
+                                fig, ax = plt.subplots(figsize=(10, 5))
+                                ax.bar(crop_compare[picked_name].astype(str), crop_compare[picked_yield], label="Average yield")
+                                ax.set_title("Crop Yield Comparison Across Crops (manual mapping)")
+                                ax.set_xlabel(str(picked_name))
+                                ax.set_ylabel(str(picked_yield))
+                                ax.legend()
+                                ax.tick_params(axis="x", rotation=45)
+                                ax.grid(axis="y", alpha=0.3)
+                                st.pyplot(fig)
+                        except Exception as e:
+                            st.warning(f"Could not render manual crop yield chart: {e}")
 
     with st.expander("🔗 Correlation Analysis (Rainfall vs Crop Yield)", expanded=False):
         st.caption("Merges standard rainfall and crop datasets by year and district/state to estimate correlation.")
@@ -591,6 +780,36 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
                     f"Prediction unavailable. Missing required mapping(s): {missing_msg}. "
                     "Check `Column Mapping Debug`."
                 )
+                st.info("Tip: choose the correct columns manually below.")
+                manual_year_opts = []
+                for c in filtered_df.columns:
+                    c_norm = str(c).strip().lower()
+                    if "year" in c_norm or c_norm in {"yr", "year"}:
+                        manual_year_opts.append(c)
+                manual_year_opts += _numeric_candidate_columns(filtered_df)
+                manual_year_opts = list(dict.fromkeys(manual_year_opts))
+
+                manual_val_opts = _numeric_candidate_columns(filtered_df)
+                manual_val_opts = list(dict.fromkeys(manual_val_opts))
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    pred_year_col = st.selectbox(
+                        "Prediction: pick year column",
+                        options=manual_year_opts,
+                        index=0 if manual_year_opts else None,
+                        key="manual_pred_year_col",
+                    )
+                with c2:
+                    pred_rain_col = st.selectbox(
+                        "Prediction: pick rainfall/value column",
+                        options=manual_val_opts,
+                        index=0 if manual_val_opts else None,
+                        key="manual_pred_rain_value_col",
+                    )
+
+                if not pred_year_col or not pred_rain_col:
+                    st.stop()
             else:
                 pred_df = filtered_df[[pred_year_col, pred_rain_col]].copy()
                 pred_df[pred_year_col] = pd.to_numeric(pred_df[pred_year_col], errors="coerce")
@@ -653,7 +872,7 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
     if compare_choice != "None":
         compare_id = DATASETS[compare_choice]
         with st.spinner(f"Fetching comparison dataset: {compare_choice} ..."):
-            df2, _ = fetch_from_api(compare_id)
+            df2, _, compare_err = fetch_from_api(compare_id)
 
         if df2 is not None and not df2.empty:
             try:
@@ -693,7 +912,15 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
             except Exception as e:
                 st.error(f"Error while comparing: {e}")
         else:
-            st.error("Could not fetch the comparison dataset.")
+            render_fetch_error(compare_err, context=f"Fetching comparison dataset `{compare_choice}`")
+
+elif "df" in st.session_state and (st.session_state["df"] is None or st.session_state["df"].empty):
+    # Fetch happened but returned no data; show details if available
+    err = st.session_state.get("last_fetch_error")
+    if err:
+        render_fetch_error(err, context=f"Fetching `{selected_dataset}`")
+    else:
+        st.info("No data loaded yet. Click `Fetch Data` to load the selected dataset.")
 
 # -------------------------
 # Footer
