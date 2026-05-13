@@ -244,6 +244,14 @@ def missing_fields_message(field_map: dict) -> str:
         return ""
     return ", ".join(missing)
 
+def fetch_dataset_with_feedback(resource_id: str, dataset_name: str):
+    with st.spinner(f"Loading `{dataset_name}` for analysis..."):
+        fetched = get_analysis_dataset(resource_id)
+    if fetched is None or fetched.empty:
+        st.warning(f"Could not load `{dataset_name}` right now. Please retry.")
+        return None
+    return fetched
+
 # -------------------------
 # Dataset selection
 # -------------------------
@@ -369,38 +377,41 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
             },
         )
 
-        try:
-            debug_rain_df = get_analysis_dataset(DATASETS["District-rainfall"])
-            debug_crop_df = get_analysis_dataset(DATASETS["District Crop Production (1997)"])
-
-            if debug_rain_df is not None and not debug_rain_df.empty:
-                debug_rain_year, debug_rainfall, debug_rain_region = prepare_rainfall_columns(debug_rain_df)
-                render_mapping_debug(
-                    "Correlation Source: District-rainfall",
-                    {
-                        "Rainfall Year": debug_rain_year,
-                        "Rainfall Value": debug_rainfall,
-                        "Region (District/State)": debug_rain_region,
-                    },
+        if st.button("Load Correlation Source Mappings", key="load_corr_mapping_debug_btn"):
+            try:
+                debug_rain_df = fetch_dataset_with_feedback(
+                    DATASETS["District-rainfall"], "District-rainfall"
                 )
-            else:
-                st.warning("Could not load `District-rainfall` for mapping debug.")
-
-            if debug_crop_df is not None and not debug_crop_df.empty:
-                debug_crop_year, debug_crop_name, debug_crop_yield, debug_crop_region = prepare_crop_columns(debug_crop_df)
-                render_mapping_debug(
-                    "Correlation Source: District Crop Production (1997)",
-                    {
-                        "Crop Year": debug_crop_year,
-                        "Crop Name": debug_crop_name,
-                        "Crop Yield/Production": debug_crop_yield,
-                        "Region (District/State)": debug_crop_region,
-                    },
+                debug_crop_df = fetch_dataset_with_feedback(
+                    DATASETS["District Crop Production (1997)"], "District Crop Production (1997)"
                 )
-            else:
-                st.warning("Could not load `District Crop Production (1997)` for mapping debug.")
-        except Exception as debug_err:
-            st.warning(f"Mapping debug for correlation sources is unavailable: {debug_err}")
+
+                if debug_rain_df is not None:
+                    debug_rain_year, debug_rainfall, debug_rain_region = prepare_rainfall_columns(debug_rain_df)
+                    render_mapping_debug(
+                        "Correlation Source: District-rainfall",
+                        {
+                            "Rainfall Year": debug_rain_year,
+                            "Rainfall Value": debug_rainfall,
+                            "Region (District/State)": debug_rain_region,
+                        },
+                    )
+
+                if debug_crop_df is not None:
+                    debug_crop_year, debug_crop_name, debug_crop_yield, debug_crop_region = prepare_crop_columns(debug_crop_df)
+                    render_mapping_debug(
+                        "Correlation Source: District Crop Production (1997)",
+                        {
+                            "Crop Year": debug_crop_year,
+                            "Crop Name": debug_crop_name,
+                            "Crop Yield/Production": debug_crop_yield,
+                            "Region (District/State)": debug_crop_region,
+                        },
+                    )
+            except Exception as debug_err:
+                st.warning(f"Mapping debug for correlation sources is unavailable: {debug_err}")
+        else:
+            st.info("Click `Load Correlation Source Mappings` only when needed. This avoids extra API calls.")
 
     # -------------------------
     # Results, visualizations, analysis
@@ -482,85 +493,90 @@ if "df" in st.session_state and st.session_state["df"] is not None and not st.se
 
     with st.expander("🔗 Correlation Analysis (Rainfall vs Crop Yield)", expanded=False):
         st.caption("Merges standard rainfall and crop datasets by year and district/state to estimate correlation.")
-        try:
-            rainfall_df = get_analysis_dataset(DATASETS["District-rainfall"])
-            crop_df = get_analysis_dataset(DATASETS["District Crop Production (1997)"])
+        if st.button("Run Correlation Analysis", key="run_corr_analysis_btn"):
+            try:
+                rainfall_df = fetch_dataset_with_feedback(DATASETS["District-rainfall"], "District-rainfall")
+                crop_df = fetch_dataset_with_feedback(
+                    DATASETS["District Crop Production (1997)"], "District Crop Production (1997)"
+                )
 
-            if rainfall_df is None or rainfall_df.empty or crop_df is None or crop_df.empty:
-                st.warning("Insufficient source data for correlation analysis. Please try again later.")
-            else:
-                rain_year_col, rain_value_col, rain_region_col = prepare_rainfall_columns(rainfall_df)
-                crop_year_col, _, crop_yield_col, crop_region_col = prepare_crop_columns(crop_df)
-
-                if not all([rain_year_col, rain_value_col, crop_year_col, crop_yield_col]):
-                    missing_msg = missing_fields_message(
-                        {
-                            "Rainfall Year": rain_year_col,
-                            "Rainfall Value": rain_value_col,
-                            "Crop Year": crop_year_col,
-                            "Crop Yield/Production": crop_yield_col,
-                        }
-                    )
-                    st.error(
-                        f"Correlation analysis unavailable. Missing required mapping(s): {missing_msg}. "
-                        "Check `Column Mapping Debug`."
-                    )
+                if rainfall_df is None or crop_df is None:
+                    st.warning("Insufficient source data for correlation analysis. Please try again later.")
                 else:
-                    rainfall_work = rainfall_df.copy()
-                    crop_work = crop_df.copy()
-                    rainfall_work[rain_year_col] = pd.to_numeric(rainfall_work[rain_year_col], errors="coerce")
-                    rainfall_work[rain_value_col] = pd.to_numeric(rainfall_work[rain_value_col], errors="coerce")
-                    crop_work[crop_year_col] = pd.to_numeric(crop_work[crop_year_col], errors="coerce")
-                    crop_work[crop_yield_col] = pd.to_numeric(crop_work[crop_yield_col], errors="coerce")
+                    rain_year_col, rain_value_col, rain_region_col = prepare_rainfall_columns(rainfall_df)
+                    crop_year_col, _, crop_yield_col, crop_region_col = prepare_crop_columns(crop_df)
 
-                    if rain_region_col and crop_region_col:
-                        rainfall_work[rain_region_col] = rainfall_work[rain_region_col].astype(str).str.strip().str.casefold()
-                        crop_work[crop_region_col] = crop_work[crop_region_col].astype(str).str.strip().str.casefold()
-                        rain_agg = rainfall_work.groupby([rain_year_col, rain_region_col], as_index=False)[rain_value_col].mean()
-                        crop_agg = crop_work.groupby([crop_year_col, crop_region_col], as_index=False)[crop_yield_col].mean()
-                        merged_corr = pd.merge(
-                            rain_agg,
-                            crop_agg,
-                            left_on=[rain_year_col, rain_region_col],
-                            right_on=[crop_year_col, crop_region_col],
-                            how="inner",
+                    if not all([rain_year_col, rain_value_col, crop_year_col, crop_yield_col]):
+                        missing_msg = missing_fields_message(
+                            {
+                                "Rainfall Year": rain_year_col,
+                                "Rainfall Value": rain_value_col,
+                                "Crop Year": crop_year_col,
+                                "Crop Yield/Production": crop_yield_col,
+                            }
+                        )
+                        st.error(
+                            f"Correlation analysis unavailable. Missing required mapping(s): {missing_msg}. "
+                            "Check `Column Mapping Debug`."
                         )
                     else:
-                        rain_agg = rainfall_work.groupby(rain_year_col, as_index=False)[rain_value_col].mean()
-                        crop_agg = crop_work.groupby(crop_year_col, as_index=False)[crop_yield_col].mean()
-                        merged_corr = pd.merge(
-                            rain_agg,
-                            crop_agg,
-                            left_on=rain_year_col,
-                            right_on=crop_year_col,
-                            how="inner",
-                        )
+                        rainfall_work = rainfall_df.copy()
+                        crop_work = crop_df.copy()
+                        rainfall_work[rain_year_col] = pd.to_numeric(rainfall_work[rain_year_col], errors="coerce")
+                        rainfall_work[rain_value_col] = pd.to_numeric(rainfall_work[rain_value_col], errors="coerce")
+                        crop_work[crop_year_col] = pd.to_numeric(crop_work[crop_year_col], errors="coerce")
+                        crop_work[crop_yield_col] = pd.to_numeric(crop_work[crop_yield_col], errors="coerce")
 
-                    merged_corr = merged_corr[[rain_value_col, crop_yield_col]].dropna()
-                    if len(merged_corr) < 3:
-                        st.warning("Not enough merged records to calculate a reliable correlation.")
-                    else:
-                        corr_score = merged_corr[[rain_value_col, crop_yield_col]].corr().iloc[0, 1]
-                        x_vals = merged_corr[rain_value_col].values
-                        y_vals = merged_corr[crop_yield_col].values
-                        line = linregress(x_vals, y_vals)
-                        x_line = np.linspace(np.min(x_vals), np.max(x_vals), 100)
-                        y_line = line.slope * x_line + line.intercept
+                        if rain_region_col and crop_region_col:
+                            rainfall_work[rain_region_col] = rainfall_work[rain_region_col].astype(str).str.strip().str.casefold()
+                            crop_work[crop_region_col] = crop_work[crop_region_col].astype(str).str.strip().str.casefold()
+                            rain_agg = rainfall_work.groupby([rain_year_col, rain_region_col], as_index=False)[rain_value_col].mean()
+                            crop_agg = crop_work.groupby([crop_year_col, crop_region_col], as_index=False)[crop_yield_col].mean()
+                            merged_corr = pd.merge(
+                                rain_agg,
+                                crop_agg,
+                                left_on=[rain_year_col, rain_region_col],
+                                right_on=[crop_year_col, crop_region_col],
+                                how="inner",
+                            )
+                        else:
+                            rain_agg = rainfall_work.groupby(rain_year_col, as_index=False)[rain_value_col].mean()
+                            crop_agg = crop_work.groupby(crop_year_col, as_index=False)[crop_yield_col].mean()
+                            merged_corr = pd.merge(
+                                rain_agg,
+                                crop_agg,
+                                left_on=rain_year_col,
+                                right_on=crop_year_col,
+                                how="inner",
+                            )
 
-                        fig, ax = plt.subplots(figsize=(8, 5))
-                        ax.scatter(x_vals, y_vals, alpha=0.7, label="Observed points")
-                        ax.plot(x_line, y_line, color="crimson", linestyle="--", label="Trend line")
-                        ax.set_title("Rainfall vs Crop Yield Correlation")
-                        ax.set_xlabel("Rainfall")
-                        ax.set_ylabel("Crop Yield")
-                        ax.legend()
-                        ax.grid(alpha=0.25)
-                        st.pyplot(fig)
+                        merged_corr = merged_corr[[rain_value_col, crop_yield_col]].dropna()
+                        if len(merged_corr) < 3:
+                            st.warning("Not enough merged records to calculate a reliable correlation.")
+                        else:
+                            corr_score = merged_corr[[rain_value_col, crop_yield_col]].corr().iloc[0, 1]
+                            x_vals = merged_corr[rain_value_col].values
+                            y_vals = merged_corr[crop_yield_col].values
+                            line = linregress(x_vals, y_vals)
+                            x_line = np.linspace(np.min(x_vals), np.max(x_vals), 100)
+                            y_line = line.slope * x_line + line.intercept
 
-                        st.metric("Pearson Correlation", f"{corr_score:.3f}")
-                        st.write(f"Interpretation: **{correlation_interpretation(float(corr_score))}**")
-        except Exception as analysis_err:
-            st.warning(f"Could not complete correlation analysis: {analysis_err}")
+                            fig, ax = plt.subplots(figsize=(8, 5))
+                            ax.scatter(x_vals, y_vals, alpha=0.7, label="Observed points")
+                            ax.plot(x_line, y_line, color="crimson", linestyle="--", label="Trend line")
+                            ax.set_title("Rainfall vs Crop Yield Correlation")
+                            ax.set_xlabel("Rainfall")
+                            ax.set_ylabel("Crop Yield")
+                            ax.legend()
+                            ax.grid(alpha=0.25)
+                            st.pyplot(fig)
+
+                            st.metric("Pearson Correlation", f"{corr_score:.3f}")
+                            st.write(f"Interpretation: **{correlation_interpretation(float(corr_score))}**")
+            except Exception as analysis_err:
+                st.warning(f"Could not complete correlation analysis: {analysis_err}")
+        else:
+            st.info("Click `Run Correlation Analysis` to fetch and merge source datasets on demand.")
 
     with st.expander("🤖 Rainfall Prediction (Linear Regression)", expanded=False):
         if filtered_df.empty:
