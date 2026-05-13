@@ -1,11 +1,11 @@
-# 🪶 Manthana — AI-Powered Q&A System
+# 🪶 AI-Powered Q&A System
 
 *"Churning government data to extract the required insights."*
 
 ---
 
 ## 📖 Overview
-**Manthana** is an AI-powered Q&A system that parses and understands **Indian government datasets** to answer user queries in natural language.  
+**It is an AI-powered Q&A system that parses and understands **Indian government datasets** to answer user queries in natural language.  
 Inspired by the Sanskrit word *Manthana* — meaning *churning* — this system extracts valuable insights from vast data sources, making open government data more **accessible, interpretable, and interactive**.
 
 ---
