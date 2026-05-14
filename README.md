@@ -1,4 +1,5 @@
-# 🪶 AI-Powered Q&A System
+# 🪶 Rainfall & Crop Yield Predictive Analytics System
+* An AI-Powered Q&A System*
 
 *"Churning government data to extract the required insights."*
 
@@ -6,7 +7,7 @@
 
 ## 📖 Overview
 **It is an AI-powered Q&A system that parses and understands **Indian government datasets** to answer user queries in natural language.  
-Inspired by the Sanskrit word *Manthana* — meaning *churning* — this system extracts valuable insights from vast data sources, making open government data more **accessible, interpretable, and interactive**.
+This system extracts valuable insights from vast data sources, making open government data more **accessible, interpretable, and interactive**.
 
 ---
 
