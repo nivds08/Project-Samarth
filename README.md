@@ -6,16 +6,15 @@
 ---
 
 ## 📖 Overview
-**It is an AI-powered Q&A system that parses and understands **Indian government datasets** to answer user queries in natural language.  
+**It is an AI-powered data visualization system that parses and understands **Indian government datasets** to provide visual insights.
 This system extracts valuable insights from vast data sources, making open government data more **accessible, interpretable, and interactive**.
 
 ---
 
 ## ⚙️ Features
-- 🧠 Natural Language Question Answering  
 - 📊 Data parsing and cleaning from government datasets  
 - 🔍 Semantic search and intelligent retrieval  
-- 🗣️ Context-aware answers with citation mapping  
+- 🗣️ Side by side data set comparison  
 - 🌐 Scalable backend for multiple datasets  
 
 ---
